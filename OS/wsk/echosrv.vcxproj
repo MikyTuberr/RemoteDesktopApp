@@ -75,7 +75,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" />
   </ImportGroup>
   <ItemGroup Label="WrappedTaskItems">
-    <ClCompile Include="Wsk\wsksmple.c">
+    <ClCompile Include="wsksmple.c">
       <WppEnabled>true</WppEnabled>
       <WppKernelMode>true</WppKernelMode>
     </ClCompile>
@@ -181,7 +181,7 @@
     </DriverSign>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ResourceCompile Include="Wsk\wsksmple.rc" />
+    <ResourceCompile Include="wsksmple.rc" />
   </ItemGroup>
   <ItemGroup>
     <Inf Exclude="@(Inf)" Include="*.inf" />

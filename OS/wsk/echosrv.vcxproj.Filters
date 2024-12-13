@@ -19,12 +19,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Wsk\wsksmple.c">
+    <ClCompile Include="wsksmple.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="Wsk\wsksmple.rc">
+    <ResourceCompile Include="wsksmple.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>

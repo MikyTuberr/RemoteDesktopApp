@@ -128,7 +128,7 @@ VOID AddKeyToBuffer(
 
 VOID CopyKeyBufferToUserSpace(
     IN WDFREQUEST Request,
-    IN ULONG OutputBufferLength
+    IN size_t OutputBufferLength
 );
 
 DRIVER_INITIALIZE DriverEntry;

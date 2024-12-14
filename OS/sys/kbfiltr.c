@@ -70,18 +70,30 @@ VOID AddKeyToBuffer(
 
 VOID CopyKeyBufferToUserSpace(
     IN WDFREQUEST Request,
-    IN ULONG OutputBufferLength
+    IN size_t OutputBufferLength
 )
 {
-    if (OutputBufferLength >= sizeof(KeyBuffer)) {
-        DebugPrint(("Trying to copy memory in IOCTL_DISPATCH_KEYBOARD_IO...\n"));
-        RtlCopyMemory(WdfRequestGetOutputBuffer(Request), KeyBuffer, sizeof(KeyBuffer));
-        WdfRequestComplete(Request, STATUS_SUCCESS);
+    PVOID outputBuffer = NULL;
+    NTSTATUS status;
+
+    status = WdfRequestRetrieveOutputBuffer(Request, 0, &outputBuffer, &OutputBufferLength);
+
+    if (NT_SUCCESS(status)) {
+        if (OutputBufferLength >= sizeof(KeyBuffer)) {
+            DebugPrint(("Trying to copy memory in IOCTL_DISPATCH_KEYBOARD_IO...\n"));
+            RtlCopyMemory(outputBuffer, KeyBuffer, sizeof(KeyBuffer));
+            WdfRequestComplete(Request, STATUS_SUCCESS);
+        }
+        else {
+            DebugPrint(("Buffer too small in IOCTL_DISPATCH_KEYBOARD_IO.\n"));
+            WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL);
+        }
     }
     else {
-        DebugPrint(("Buffer too small in IOCTL_DISPATCH_KEYBOARD_IO.\n"));
-        WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL);
+        DebugPrint(("Failed to retrieve output buffer.\n"));
+        WdfRequestComplete(Request, status);
     }
+
 }
 
 ULONG InstanceNo = 0;

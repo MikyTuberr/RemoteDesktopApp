@@ -120,6 +120,10 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(WORKER_ITEM_CONTEXT, GetWorkItemContext)
 //
 // Prototypes
 //
+VOID InitializeKeyBuffer();
+
+VOID AddKeyToBuffer(UCHAR key);
+
 DRIVER_INITIALIZE DriverEntry;
 
 EVT_WDF_DRIVER_DEVICE_ADD KbFilter_EvtDeviceAdd;

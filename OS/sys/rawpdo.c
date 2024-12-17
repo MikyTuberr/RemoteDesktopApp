@@ -82,6 +82,7 @@ Return Value:
     //
 
     switch (IoControlCode) {
+    case IOCTL_DISPATCH_KEYBOARD_IO:
     case IOCTL_KBFILTR_GET_KEYBOARD_ATTRIBUTES:
         WDF_REQUEST_FORWARD_OPTIONS_INIT(&forwardOptions);
         status = WdfRequestForwardToParentDeviceIoQueue(Request, pdoData->ParentQueue, &forwardOptions);

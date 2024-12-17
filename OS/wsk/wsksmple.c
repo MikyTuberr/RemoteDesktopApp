@@ -43,6 +43,8 @@ Revision History:
 #include <ntddk.h>
 #include <wsk.h>
 
+#include "public.h"
+
 #pragma warning(pop)
 
 // Software Tracing definitions
@@ -199,6 +201,11 @@ IO_COMPLETION_ROUTINE WskSampleSendIrpCompletionRoutine;
 IO_COMPLETION_ROUTINE WskSampleDisconnectIrpCompletionRoutine;
 IO_COMPLETION_ROUTINE WskSampleCloseIrpCompletionRoutine;
 
+NTSTATUS WskSampleIoControl(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ PIRP Irp
+    );
+
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
@@ -306,6 +313,80 @@ WskSampleUnload(
 
 #endif
 
+NTSTATUS WskSampleIoControl(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ PIRP Irp
+) 
+{
+    PIO_STACK_LOCATION irpSp;
+    NTSTATUS status = STATUS_SUCCESS;
+    ULONG controlCode;
+    PVOID inputBuffer;
+    ULONG inputBufferLength;
+
+    irpSp = IoGetCurrentIrpStackLocation(Irp);
+    controlCode = irpSp->Parameters.DeviceIoControl.IoControlCode;
+    inputBuffer = Irp->AssociatedIrp.SystemBuffer;
+    inputBufferLength = irpSp->Parameters.DeviceIoControl.InputBufferLength;
+
+    switch (controlCode) {
+        case IOCTL_SEND_DATA:
+            if (inputBufferLength > 0 && inputBuffer != NULL) {
+                PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext = &WskSampleListeningSocketContext->OpContext[0];
+                PWSKSAMPLE_SOCKET_CONTEXT socketContext = SocketOpContext->SocketContext;
+
+                PAGED_CODE();
+
+                if (socketContext->Closing || socketContext->Disconnecting) {
+                    DoTraceMessage(TRCINFO, "Socket is closing or disconnecting. Skipping send.");
+                    status = STATUS_DEVICE_NOT_READY;
+                    break;
+                }
+
+                WSK_BUF wskbuf;
+                wskbuf.Offset = 0;
+                wskbuf.Length = inputBufferLength;
+
+                PMDL mdl = IoAllocateMdl(inputBuffer, inputBufferLength, FALSE, FALSE, NULL);
+                if (mdl == NULL) {
+                    status = STATUS_INSUFFICIENT_RESOURCES;
+                    break;
+                }
+
+                MmBuildMdlForNonPagedPool(mdl);
+                wskbuf.Mdl = mdl;
+
+                CONST WSK_PROVIDER_CONNECTION_DISPATCH* dispatch = socketContext->Socket->Dispatch;
+
+                DoTraceMessage(TRCINFO, "Sending %lu bytes to the socket.", inputBufferLength);
+
+                status = dispatch->WskSend(
+                    socketContext->Socket,
+                    &wskbuf,
+                    0,
+                    Irp
+                );
+
+                IoFreeMdl(mdl);
+
+                if (!NT_SUCCESS(status)) {
+                    DoTraceMessage(TRCERROR, "WskSend failed with status 0x%08X", status);
+                }
+            }
+            else {
+                status = STATUS_INVALID_PARAMETER;
+            }
+            break;
+        default:
+            status = STATUS_INVALID_DEVICE_REQUEST;
+            break;
+    }
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return status;
+}
+
 // Driver entry routine
 NTSTATUS
 DriverEntry(
@@ -353,6 +434,8 @@ DriverEntry(
     // Enqueue the first operation to setup the listening socket
     WskSampleEnqueueOp(&WskSampleListeningSocketContext->OpContext[0],
                        WskSampleOpStartListen);
+
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = WskSampleIoControl;
     
     // Everything has been initiated successfully. Now we can enable the
     // unload routine and return.

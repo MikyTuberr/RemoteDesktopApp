@@ -15,6 +15,7 @@
 #pragma warning(default:4201)
 
 #include "..\sys\public.h"
+#include "..\wsk\public.h"
 
 //-----------------------------------------------------------------------------
 // 4127 -- Conditional Expression is Constant warning

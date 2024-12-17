@@ -33,6 +33,50 @@ typedef struct _KEY_BUFFER {
     ULONG Count;
 } KEY_BUFFER;
 
+// 2D array for scan code to key name mapping
+const char* KeyMap[8][16] = {
+    {"NULL", "Esc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "Backspace", "Tab"},
+    {"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "Enter", "LCtrl", "A", "S"},
+    {"D", "F", "G", "H", "J", "K", "L", ";", "\"", "`", "LShift", "\\", "Z", "X", "C", "V"},
+    {"B", "N", "M", ",", ".", "/", "RShift", "*", "Alt", "Space", "CapsLock", "F1", "F2", "F3", "F4", "F5"},
+    {"F6", "F7", "F8", "F9", "F10", "Numlock", "Right", "Numpad7", "Numpad8", "Numpad9", "-", "Numpad4", "Numpad5", "Numpad6", "+", "Numpad1"},
+    {"Numpad2", "Numpad3", "Numpad0", "Delete", "F5", "F6", "F7", "F11", "F12", "F10", "F11", "WinKey", "", "", "", ""},
+    {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""},
+    {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+};
+
+// Helper function to convert scan code to key name
+const char* ScanCodeToKeyName(UCHAR scanCode) {
+    if (scanCode < 0x80) {
+        return KeyMap[scanCode / 16][scanCode % 16]; // Row and column based on scan code
+    }
+    return "Unknown";
+}
+
+// Helper function to convert scan code to special key name
+const char* ScanCodeToSpecialKeyName(UCHAR scanCode) {
+	switch (scanCode) {
+	case 0x52:
+		return "Insert";
+		break;
+	case 0x4D:
+		return "Right";
+		break;
+	case 0x4B:
+		return "Left";
+		break;
+	case 0x50:
+		return "Down";
+		break;
+	case 0x48:
+		return "Up";
+		break;
+
+	default:
+		return "Unknown";
+	}
+}
+
 int
 _cdecl
 main(
@@ -186,7 +230,7 @@ main(
     }
 
     //
-    // Send an IOCTL to retrive the keyboard attributes
+    // Send an IOCTL to retrieve the keyboard attributes
     // These are cached in the kbfiltr
     //
 
@@ -210,17 +254,26 @@ main(
                         break;
                     }
                     else {
-                        printf("ScanCode: 0x%x\n", keyBuffer.ScanCodes[i]);
+                        char key;
+                        if (keyBuffer.ScanCodes[i] == 0x2a) {
+                            // special signs, another table
+							key = keyBuffer.ScanCodes[i];
+							UCHAR next = keyBuffer.ScanCodes[i + 1];
+                            i++;
+							printf("ScanCode: 0x%x 0x%x -> %s\n", key, next, ScanCodeToSpecialKeyName(next));
+                        }
+                        else {
+                            printf("ScanCode: 0x%x -> %s\n", keyBuffer.ScanCodes[i], ScanCodeToKeyName(keyBuffer.ScanCodes[i]));
+                        }
                     }
                 }
             }
         }
         else {
             printf("Error during reading keys from buffer: %x\n", GetLastError());
-            // break;
         }
 
-		Sleep(500);
+        Sleep(500);
     }
 
     free(deviceInterfaceDetailData);

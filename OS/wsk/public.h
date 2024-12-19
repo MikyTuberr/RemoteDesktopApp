@@ -1,5 +1,5 @@
-#ifndef _PUBLIC_H
-#define _PUBLIC_H
+#ifndef _PUBLIC2_H
+#define _PUBLIC2_H
 
 #define IOCTL_INDEX_SEND_DATA    0x800
 

@@ -27,6 +27,9 @@ DEFINE_GUID(GUID_DEVINTERFACE_KBFILTER,
     0x3fb7299d, 0x6847, 0x4490, 0xb0, 0xc9, 0x99, 0xe0, 0x98, 0x6a, 0xb8, 0x86);
 // {3FB7299D-6847-4490-B0C9-99E0986AB886}
 
+DEFINE_GUID(GUID_DEVINTERFACE_ECHOSRV,
+    0x12345678, 0x1234, 0x1234, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB);
+
 #define BUFFER_SIZE 128
 
 typedef struct _KEY_BUFFER {
@@ -56,26 +59,26 @@ const char* ScanCodeToKeyName(UCHAR scanCode) {
 
 // Helper function to convert scan code to special key name
 const char* ScanCodeToSpecialKeyName(UCHAR scanCode) {
-	switch (scanCode) {
-	case 0x52:
-		return "Insert";
-		break;
-	case 0x4D:
-		return "Right";
-		break;
-	case 0x4B:
-		return "Left";
-		break;
-	case 0x50:
-		return "Down";
-		break;
-	case 0x48:
-		return "Up";
-		break;
+    switch (scanCode) {
+    case 0x52:
+        return "Insert";
+        break;
+    case 0x4D:
+        return "Right";
+        break;
+    case 0x4B:
+        return "Left";
+        break;
+    case 0x50:
+        return "Down";
+        break;
+    case 0x48:
+        return "Up";
+        break;
 
-	default:
-		return "Unknown";
-	}
+    default:
+        return "Unknown";
+    }
 }
 
 int
@@ -90,7 +93,7 @@ main(
     PSP_DEVICE_INTERFACE_DETAIL_DATA    deviceInterfaceDetailData = NULL;
     ULONG                               predictedLength = 0;
     ULONG                               requiredLength = 0;
-    HANDLE                              file;
+    HANDLE                              fileKeyboard, fileWebsocket;
     ULONG                               i = 0;
 
     UNREFERENCED_PARAMETER(argc);
@@ -114,9 +117,6 @@ main(
     }
 
     deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-    printf("\nList of KBFILTER Device Interfaces\n");
-    printf("---------------------------------\n");
 
     i = 0;
 
@@ -213,10 +213,76 @@ main(
     // Open the last toaster device interface
     //
 
-    printf("\nOpening the last interface:\n %s\n",
-        deviceInterfaceDetailData->DevicePath);
+    printf("Opening %s\n", deviceInterfaceDetailData->DevicePath);
 
-    file = CreateFile(deviceInterfaceDetailData->DevicePath,
+    hardwareDeviceInfo = SetupDiGetClassDevs(
+        (LPGUID)&GUID_DEVINTERFACE_ECHOSRV,
+        NULL, // Define no enumerator (global)
+        NULL, // Define no
+        (DIGCF_PRESENT | // Only Devices present
+            DIGCF_DEVICEINTERFACE)); // Function class devices.
+    if (INVALID_HANDLE_VALUE == hardwareDeviceInfo)
+    {
+        printf("SetupDiGetClassDevs failed: %x\n", GetLastError());
+        return 0;
+    }
+
+    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+    if (!SetupDiEnumDeviceInterfaces(hardwareDeviceInfo,
+        0, // No care about specific PDOs
+        (LPGUID)&GUID_DEVINTERFACE_ECHOSRV,
+        0, //
+        &deviceInterfaceData)) {
+        printf("SetupDiEnumDeviceInterfaces failed: %x\n", GetLastError());
+        SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
+        return 0;
+    }
+
+    if (!SetupDiGetDeviceInterfaceDetail(
+        hardwareDeviceInfo,
+        &deviceInterfaceData,
+        NULL, // probing so no output buffer yet
+        0, // probing so output buffer length of zero
+        &requiredLength,
+        NULL)) { // not interested in the specific dev-node
+        if (ERROR_INSUFFICIENT_BUFFER != GetLastError()) {
+            printf("SetupDiGetDeviceInterfaceDetail failed %d\n", GetLastError());
+            SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
+            return 0;
+        }
+    }
+
+    predictedLength = requiredLength;
+
+    deviceInterfaceDetailData = malloc(predictedLength);
+
+    if (deviceInterfaceDetailData) {
+        deviceInterfaceDetailData->cbSize =
+            sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+    }
+    else {
+        printf("Couldn't allocate %d bytes for device interface details.\n", predictedLength);
+        SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
+        return 0;
+    }
+
+    if (!SetupDiGetDeviceInterfaceDetail(
+        hardwareDeviceInfo,
+        &deviceInterfaceData,
+        deviceInterfaceDetailData,
+        predictedLength,
+        &requiredLength,
+        NULL)) {
+        printf("Error in SetupDiGetDeviceInterfaceDetail\n");
+        SetupDiDestroyDeviceInfoList(hardwareDeviceInfo);
+        free(deviceInterfaceDetailData);
+        return 0;
+    }
+
+    printf("Opening %s\n", deviceInterfaceDetailData->DevicePath);
+
+    fileWebsocket = CreateFile(deviceInterfaceDetailData->DevicePath,
         GENERIC_READ | GENERIC_WRITE,
         0,
         NULL, // no SECURITY_ATTRIBUTES structure
@@ -224,9 +290,42 @@ main(
         0, // No special attributes
         NULL);
 
-    if (INVALID_HANDLE_VALUE == file) {
-        printf("Error in CreateFile: %x", GetLastError());
+    if (INVALID_HANDLE_VALUE == fileWebsocket) {
+        printf("Error in CreateFile: %x\n", GetLastError());
         free(deviceInterfaceDetailData);
+        return 0;
+    }
+
+    char buffer[] = "Hello, World!";
+
+    BOOL result = DeviceIoControl(
+        fileWebsocket,
+        IOCTL_SEND_DATA,
+        buffer, sizeof(buffer),
+        NULL, 0,
+        NULL,
+        NULL
+    );
+
+    if (!result) {
+        printf("Error in DeviceIoControl: %x\n", GetLastError());
+        CloseHandle(fileWebsocket);
+        free(deviceInterfaceDetailData);
+        return 0;
+    }
+
+    fileKeyboard = CreateFile(deviceInterfaceDetailData->DevicePath,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL, // no SECURITY_ATTRIBUTES structure
+        OPEN_EXISTING, // No special create flags
+        0, // No special attributes
+        NULL);
+
+    if (INVALID_HANDLE_VALUE == fileKeyboard) {
+        printf("Error in CreateFile: %x\n", GetLastError());
+        free(deviceInterfaceDetailData);
+        CloseHandle(fileWebsocket);
         return 0;
     }
 
@@ -239,8 +338,8 @@ main(
         DWORD dwBytesReturned = 0;
         KEY_BUFFER keyBuffer;
 
-        BOOL result = DeviceIoControl(
-            file,
+        result = DeviceIoControl(
+            fileKeyboard,
             IOCTL_DISPATCH_KEYBOARD_IO,
             NULL, 0,
             &keyBuffer, sizeof(KEY_BUFFER),
@@ -258,10 +357,10 @@ main(
                         char key;
                         if (keyBuffer.ScanCodes[i] == 0x2a) {
                             // special signs, another table
-							key = keyBuffer.ScanCodes[i];
-							UCHAR next = keyBuffer.ScanCodes[i + 1];
+                            key = keyBuffer.ScanCodes[i];
+                            UCHAR next = keyBuffer.ScanCodes[i + 1];
                             i++;
-							printf("ScanCode: 0x%x 0x%x -> %s\n", key, next, ScanCodeToSpecialKeyName(next));
+                            printf("ScanCode: 0x%x 0x%x -> %s\n", key, next, ScanCodeToSpecialKeyName(next));
                         }
                         else {
                             printf("ScanCode: 0x%x -> %s\n", keyBuffer.ScanCodes[i], ScanCodeToKeyName(keyBuffer.ScanCodes[i]));
@@ -278,6 +377,7 @@ main(
     }
 
     free(deviceInterfaceDetailData);
-    CloseHandle(file);
+    CloseHandle(fileKeyboard);
+    CloseHandle(fileWebsocket);
     return 0;
 }

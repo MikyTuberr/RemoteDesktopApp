@@ -42,6 +42,7 @@ Revision History:
 
 #include <ntddk.h>
 #include <wsk.h>
+#include <wdm.h>
 
 #include "public.h"
 
@@ -55,6 +56,15 @@ Revision History:
         WPP_DEFINE_BIT(TRCINFO) )
 
 #include "wsksmple.tmh"
+
+#include <initguid.h>
+
+// Define the GUID for the echosrv device
+DEFINE_GUID(GUID_DEVINTERFACE_ECHOSRV,
+    0x12345678, 0x1234, 0x1234, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB);
+
+#define DRIVER_DEVICE_NAME L"\\Device\\Echosrv"
+#define DRIVER_SYMBOLIC_NAME L"\\DosDevices\\echosrv"
 
 // Pool tags used for memory allocations
 #define WSKSAMPLE_SOCKET_POOL_TAG ((ULONG)'sksw')
@@ -168,6 +178,8 @@ const WSK_CLIENT_DISPATCH WskSampleClientDispatch = {
 
 // WSK Registration object
 WSK_REGISTRATION WskSampleRegistration;
+PDEVICE_OBJECT g_DeviceObject = NULL;
+UNICODE_STRING g_SymbolicLinkName;
 
 // Socket-level callback table for listening sockets
 const WSK_CLIENT_LISTEN_DISPATCH WskSampleClientListenDispatch = {
@@ -324,6 +336,8 @@ NTSTATUS WskSampleIoControl(
     PVOID inputBuffer;
     ULONG inputBufferLength;
 
+    DeviceObject;
+
     irpSp = IoGetCurrentIrpStackLocation(Irp);
     controlCode = irpSp->Parameters.DeviceIoControl.IoControlCode;
     inputBuffer = Irp->AssociatedIrp.SystemBuffer;
@@ -392,23 +406,50 @@ NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
     _In_ PUNICODE_STRING RegistryPath
-    )
+)
 {
     NTSTATUS status;
     WSK_CLIENT_NPI wskClientNpi;
-    
+
     UNREFERENCED_PARAMETER(RegistryPath);
 
     PAGED_CODE();
 
     ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
-    
+
+    UNICODE_STRING deviceName;
+    RtlInitUnicodeString(&deviceName, DRIVER_DEVICE_NAME);
+    status = IoCreateDevice(
+        DriverObject,
+        0, // Device extension size
+        &deviceName,
+        FILE_DEVICE_UNKNOWN,
+        0, // Device characteristics
+        FALSE, // Not exclusive
+        &g_DeviceObject
+    );
+
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("Failed to create device object (0x%08X)\n", status));
+        return status;
+    }
+
+    // Step 2: Create Symbolic Link
+    RtlInitUnicodeString(&g_SymbolicLinkName, DRIVER_SYMBOLIC_NAME);
+    status = IoCreateSymbolicLink(&g_SymbolicLinkName, &deviceName);
+
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("Failed to create symbolic link (0x%08X)\n", status));
+        IoDeleteDevice(g_DeviceObject);
+        return status;
+    }
+
     // Allocate a socket context that will be used for queueing an operation
     // to setup a listening socket that will accept incoming connections
     WskSampleListeningSocketContext = WskSampleAllocateSocketContext(
-                                            &WskSampleWorkQueue, 0);
+        &WskSampleWorkQueue, 0);
 
-    if(WskSampleListeningSocketContext == NULL) {
+    if (WskSampleListeningSocketContext == NULL) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -417,7 +458,7 @@ DriverEntry(
     wskClientNpi.Dispatch = &WskSampleClientDispatch;
     status = WskRegister(&wskClientNpi, &WskSampleRegistration);
 
-    if(!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status)) {
         WskSampleFreeSocketContext(WskSampleListeningSocketContext);
         return status;
     }
@@ -425,7 +466,7 @@ DriverEntry(
     // Initialize and start the global work queue
     status = WskSampleStartWorkQueue(&WskSampleWorkQueue);
 
-    if(!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status)) {
         WskDeregister(&WskSampleRegistration);
         WskSampleFreeSocketContext(WskSampleListeningSocketContext);
         return status;
@@ -433,21 +474,22 @@ DriverEntry(
 
     // Enqueue the first operation to setup the listening socket
     WskSampleEnqueueOp(&WskSampleListeningSocketContext->OpContext[0],
-                       WskSampleOpStartListen);
+        WskSampleOpStartListen);
 
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = WskSampleIoControl;
-    
+
     // Everything has been initiated successfully. Now we can enable the
     // unload routine and return.
     DriverObject->DriverUnload = WskSampleUnload;
 
     // Initialize software tracing
     WPP_INIT_TRACING(DriverObject, RegistryPath);
-    
+
     DoTraceMessage(TRCINFO, "LOADED");
-    
+
     return STATUS_SUCCESS;
 }
+
 
 // Driver unload routine
 VOID
@@ -495,6 +537,12 @@ WskSampleUnload(
     // the worker thread can now safely stop processing the work queue if there
     // are no queued items. Signal the worker thread to stop and wait for it. 
     WskSampleStopWorkQueue(&WskSampleWorkQueue);
+
+    // Delete Symbolic Link
+    IoDeleteSymbolicLink(&g_SymbolicLinkName);
+
+    // Delete Device Object
+    IoDeleteDevice(DriverObject->DeviceObject);
     
     DoTraceMessage(TRCINFO, "UNLOAD END");
 

@@ -6,6 +6,6 @@
 #define IOCTL_SEND_DATA CTL_CODE(   FILE_DEVICE_UNKNOWN,   \
                                     IOCTL_INDEX_SEND_DATA,    \
                                     METHOD_BUFFERED,    \
-                                    FILE_WRITE_ACCESS)
+                                    FILE_WRITE_ACCESS | FILE_READ_ACCESS)
 
 #endif

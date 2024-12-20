@@ -236,18 +236,18 @@ main(
         return 0;
     }
 
-	char message[] = "Hello from user mode!";
-	DWORD bytesReturned;
+    char message[] = "Hello from user mode!";
+    DWORD bytesReturned;
 
     if (!DeviceIoControl(
         fileWebsocket,
         IOCTL_SEND_DATA,
-        message,
-        sizeof(message),
-        NULL,
-        0,
+        (PVOID)message, // Input buffer
+        sizeof(message), // Input buffer length
+        NULL, // No output buffer
+        0, // No output buffer length
         &bytesReturned,
-        NULL
+        0
     )) {
         printf("Failed to send data: %d\n", GetLastError());
     }

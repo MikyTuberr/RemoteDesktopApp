@@ -988,13 +988,12 @@ WskSampleAcceptEvent(
     _In_  PSOCKADDR     LocalAddress,
     _In_  PSOCKADDR     RemoteAddress,
     _In_opt_  PWSK_SOCKET AcceptSocket,
-    _Outptr_result_maybenull_ PVOID * AcceptSocketContext,
-    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH * *AcceptSocketDispatch
+    _Outptr_result_maybenull_ PVOID* AcceptSocketContext,
+    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH** AcceptSocketDispatch
 )
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext = NULL;
     PWSKSAMPLE_SOCKET_CONTEXT listeningSocketContext;
-    ULONG i;
 
     UNREFERENCED_PARAMETER(Flags);
     UNREFERENCED_PARAMETER(LocalAddress);
@@ -1031,16 +1030,6 @@ WskSampleAcceptEvent(
     socketContext->Socket = AcceptSocket;
 
     DoTraceMessage(TRCINFO, "AcceptEvent: %p", socketContext);
-
-    // Enqueue receive operations on the accepted socket. Whenever a receive
-    // operation is completed successfully, the received data will be echoed
-    // back to the peer via a send operation. Whenever a send operation is 
-    // completed, a new receive request will be issued over the connection.
-    // This will continue until the connection is closed by the peer.
-    for (i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
-        _Analysis_assume_(socketContext == socketContext->OpContext[i].SocketContext);
-        WskSampleEnqueueOp(&socketContext->OpContext[i], WskSampleOpReceive);
-    }
 
     // Since we will not use any callbacks on the accepted socket, we specify no
     // socketContext or callback dispatch table pointer for the accepted socket.
@@ -1142,6 +1131,7 @@ WskSampleOpSend(
             &wskbuf,
             0,
             SocketOpContext->Irp);
+		MmUnlockPages(SocketOpContext->DataMdl);
     }
 }
 
@@ -1406,8 +1396,8 @@ WskSampleDeviceControl(
     PIO_STACK_LOCATION irpSp;
     NTSTATUS status = STATUS_SUCCESS;
     ULONG_PTR information = 0;
-    PVOID inputBuffer;
-    ULONG inputBufferLength;
+    PVOID inputBuffer = NULL;
+    ULONG inputBufferLength = 0;
 
     UNREFERENCED_PARAMETER(DeviceObject);
 
@@ -1415,10 +1405,17 @@ WskSampleDeviceControl(
 
     switch (irpSp->Parameters.DeviceIoControl.IoControlCode) {
     case IOCTL_SEND_DATA:
-        inputBuffer = Irp->AssociatedIrp.SystemBuffer;
-        inputBufferLength = irpSp->Parameters.DeviceIoControl.InputBufferLength;
+        // SprawdŸ metodê transferu danych
+        if (irpSp->Parameters.DeviceIoControl.InputBufferLength > 0) {
+            inputBuffer = Irp->AssociatedIrp.SystemBuffer;
+            inputBufferLength = irpSp->Parameters.DeviceIoControl.InputBufferLength;
 
-        if (inputBuffer == NULL || inputBufferLength == 0) {
+            if (inputBuffer == NULL) {
+                status = STATUS_INVALID_PARAMETER;
+                break;
+            }
+        }
+        else {
             status = STATUS_INVALID_PARAMETER;
             break;
         }
@@ -1510,13 +1507,50 @@ WskSampleSendData(
     ULONG DataLength
 )
 {
-	PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext = &WskSampleListeningSocketContext->OpContext[0];
+    PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext = NULL;
+    PWSKSAMPLE_SOCKET_CONTEXT socketContext = NULL;
+    ULONG i;
+    PMDL mdl;
 
+    // ZnajdŸ pierwszy dostêpny socket w trybie po³¹czenia
+    for (i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
+        if (WskSampleListeningSocketContext->OpContext[i].SocketContext != NULL &&
+            WskSampleListeningSocketContext->OpContext[i].SocketContext->Socket != NULL &&
+            !WskSampleListeningSocketContext->OpContext[i].SocketContext->Closing &&
+            !WskSampleListeningSocketContext->OpContext[i].SocketContext->Disconnecting) {
+            socketContext = WskSampleListeningSocketContext->OpContext[i].SocketContext;
+            break;
+        }
+    }
+
+    if (socketContext == NULL) {
+        DoTraceMessage(TRCERROR, "WskSampleSendData: No connected socket available");
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    SocketOpContext = &socketContext->OpContext[0];
+
+    mdl = IoAllocateMdl(DataBuffer, DataLength, FALSE, FALSE, NULL);
+
+    if (mdl == NULL) {
+        DoTraceMessage(TRCERROR, "WskSampleSendData: IoAllocateMdl failed");
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    __try {
+        MmProbeAndLockPages(mdl, KernelMode, IoReadAccess);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        DoTraceMessage(TRCERROR, "WskSampleSendData: MmProbeAndLockPages failed");
+        IoFreeMdl(mdl);
+        return GetExceptionCode();
+    }
+
+    SocketOpContext->DataLength = DataLength;
 	SocketOpContext->DataBuffer = DataBuffer;
-	SocketOpContext->DataLength = DataLength;
-	SocketOpContext->DataMdl = IoAllocateMdl(SocketOpContext->DataBuffer, DataLength, FALSE, FALSE, NULL);
+	SocketOpContext->DataMdl = mdl;
 
-	WskSampleEnqueueOp(SocketOpContext, WskSampleOpSend);
+    WskSampleEnqueueOp(SocketOpContext, WskSampleOpSend);
 
-	return STATUS_SUCCESS;
+    return STATUS_SUCCESS;
 }

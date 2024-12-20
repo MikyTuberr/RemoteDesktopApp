@@ -8,13 +8,13 @@ Module Name:
 
 Abstract:
 
-    This module implements a simple kernel-mode application by using the 
+    This module implements a simple kernel-mode application by using the
     Winsock Kernel (WSK) programming interface. The application accepts
     incoming connection requests and, on each connection, echoes all received
     data back to the peer until the connection is closed by the peer.
     The application is designed to use a single worker thread to perform all of
-    its processing. For better performance on MP machines, the sample may be 
-    enhanced to use more worker threads. Operations on a given connection 
+    its processing. For better performance on MP machines, the sample may be
+    enhanced to use more worker threads. Operations on a given connection
     should always be processed by the same worker thread. This provides a
     simple form of synchronization ensuring proper socket closure in a setting
     where multiple operations may be outstanding and completed asynchronously
@@ -22,7 +22,7 @@ Abstract:
     enforce any limit on the number of connections accepted (other than the
     natural limit imposed by the available system memory) or on the amount of
     time a connection stays around. A full-fledged server application should be
-    designed with these points in mind from a security viewpoint. 
+    designed with these points in mind from a security viewpoint.
 
 Author:
 
@@ -42,9 +42,6 @@ Revision History:
 
 #include <ntddk.h>
 #include <wsk.h>
-#include <wdm.h>
-
-#include "public.h"
 
 #pragma warning(pop)
 
@@ -56,15 +53,7 @@ Revision History:
         WPP_DEFINE_BIT(TRCINFO) )
 
 #include "wsksmple.tmh"
-
-#include <initguid.h>
-
-// Define the GUID for the echosrv device
-DEFINE_GUID(GUID_DEVINTERFACE_ECHOSRV,
-    0x12345678, 0x1234, 0x1234, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB);
-
-#define DRIVER_DEVICE_NAME L"\\Device\\Echosrv"
-#define DRIVER_SYMBOLIC_NAME L"\\DosDevices\\echosrv"
+#include "public.h"
 
 // Pool tags used for memory allocations
 #define WSKSAMPLE_SOCKET_POOL_TAG ((ULONG)'sksw')
@@ -75,15 +64,15 @@ DEFINE_GUID(GUID_DEVINTERFACE_ECHOSRV,
 #define WSKSAMPLE_DATA_BUFFER_LENGTH 2048
 
 // Forward declaration for the socket context structure
-typedef struct _WSKSAMPLE_SOCKET_CONTEXT *PWSKSAMPLE_SOCKET_CONTEXT;
+typedef struct _WSKSAMPLE_SOCKET_CONTEXT* PWSKSAMPLE_SOCKET_CONTEXT;
 
 // Forward declaration for the socket operation context structure
-typedef struct _WSKSAMPLE_SOCKET_OP_CONTEXT *PWSKSAMPLE_SOCKET_OP_CONTEXT;
+typedef struct _WSKSAMPLE_SOCKET_OP_CONTEXT* PWSKSAMPLE_SOCKET_OP_CONTEXT;
 
 // Function prototype for socket operation handling routines
 typedef
 VOID
-(* PWSKSAMPLE_OP_HANDLER_FN)(
+(*PWSKSAMPLE_OP_HANDLER_FN)(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext);
 
 // Structure that represents a work queue processed by a dedicated worker thread
@@ -100,30 +89,30 @@ typedef struct _WSKSAMPLE_WORK_QUEUE {
 
     // Worker thread pointer
     PETHREAD Thread;
-    
-} WSKSAMPLE_WORK_QUEUE, *PWSKSAMPLE_WORK_QUEUE;
+
+} WSKSAMPLE_WORK_QUEUE, * PWSKSAMPLE_WORK_QUEUE;
 
 // Structure that represents the context for a WSK socket operation.
 typedef struct _WSKSAMPLE_SOCKET_OP_CONTEXT {
 
     // Work queue linkage
     SLIST_ENTRY QueueEntry;
-    
+
     // Pointer to the function that will handle the operation 
     PWSKSAMPLE_OP_HANDLER_FN OpHandler;
-    
+
     // Pointer to the WSK socket context.
     PWSKSAMPLE_SOCKET_CONTEXT SocketContext;
 
     // IRP to use for the operation
     PIRP Irp;
-    
+
     // Data buffer and MDL used by send and receive operations
-    _Field_size_bytes_part_(BufferLength,DataLength) PVOID  DataBuffer;
+    _Field_size_bytes_part_(BufferLength, DataLength) PVOID  DataBuffer;
     PMDL   DataMdl;
     SIZE_T BufferLength; // size of the buffer
     SIZE_T DataLength;   // length of actual data stored in the buffer
-    
+
 } WSKSAMPLE_SOCKET_OP_CONTEXT;
 
 // Maximum number of operations that can be outstanding on a socket at any time 
@@ -144,7 +133,7 @@ typedef struct _WSKSAMPLE_SOCKET_CONTEXT {
     // Peer has gracefully disconnected its half of the connection and we are
     // about to disconnect (or have disconnected) our half.
     BOOLEAN Disconnecting;
-    
+
     // Stop accepting incoming connections. Valid for listening sockets only.
     BOOLEAN StopListening;
 
@@ -153,21 +142,21 @@ typedef struct _WSKSAMPLE_SOCKET_CONTEXT {
     // sample preallocates a fixed number of operation contexts along with
     // the socket context for a new socket.
     WSKSAMPLE_SOCKET_OP_CONTEXT OpContext[WSKSAMPLE_OP_COUNT];
-    
+
 } WSKSAMPLE_SOCKET_CONTEXT;
 
 // Forward declaration for WskAcceptEvent in WSK_CLIENT_LISTEN_DISPATCH 
 NTSTATUS
-WSKAPI 
+WSKAPI
 WskSampleAcceptEvent(
     _In_  PVOID         SocketContext,
     _In_  ULONG         Flags,
     _In_  PSOCKADDR     LocalAddress,
     _In_  PSOCKADDR     RemoteAddress,
     _In_opt_  PWSK_SOCKET AcceptSocket,
-    _Outptr_result_maybenull_ PVOID *AcceptSocketContext,
-    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH **AcceptSocketDispatch
-    );
+    _Outptr_result_maybenull_ PVOID* AcceptSocketContext,
+    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH** AcceptSocketDispatch
+);
 
 // Client-level callback table
 const WSK_CLIENT_DISPATCH WskSampleClientDispatch = {
@@ -178,8 +167,6 @@ const WSK_CLIENT_DISPATCH WskSampleClientDispatch = {
 
 // WSK Registration object
 WSK_REGISTRATION WskSampleRegistration;
-PDEVICE_OBJECT g_DeviceObject = NULL;
-UNICODE_STRING g_SymbolicLinkName;
 
 // Socket-level callback table for listening sockets
 const WSK_CLIENT_LISTEN_DISPATCH WskSampleClientListenDispatch = {
@@ -196,11 +183,11 @@ WSKSAMPLE_WORK_QUEUE WskSampleWorkQueue;
 
 // IPv6 wildcard address and port number 40007 to listen on
 SOCKADDR_IN6 IPv6ListeningAddress = {
-                    AF_INET6, 
+                    AF_INET6,
                     0x479c, // 40007 in hex in network byte order 
-                    0, 
+                    0,
                     IN6ADDR_ANY_INIT,
-                    0};
+                    0 };
 
 // Forward function declarations
 
@@ -213,16 +200,11 @@ IO_COMPLETION_ROUTINE WskSampleSendIrpCompletionRoutine;
 IO_COMPLETION_ROUTINE WskSampleDisconnectIrpCompletionRoutine;
 IO_COMPLETION_ROUTINE WskSampleCloseIrpCompletionRoutine;
 
-NTSTATUS WskSampleIoControl(
-    _In_ PDEVICE_OBJECT DeviceObject,
-    _In_ PIRP Irp
-    );
-
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
     _In_ PUNICODE_STRING RegistryPath
-    );
+);
 
 _Must_inspect_result_
 __drv_allocatesMem(Mem)
@@ -231,81 +213,105 @@ PWSKSAMPLE_SOCKET_CONTEXT
 WskSampleAllocateSocketContext(
     _In_ PWSKSAMPLE_WORK_QUEUE WorkQueue,
     _In_ ULONG BufferLength
-    );
+);
 
 _At_(SocketContext, __drv_freesMem(Mem))
 VOID
 WskSampleFreeSocketContext(
     _In_ PWSKSAMPLE_SOCKET_CONTEXT SocketContext
-    );
+);
 
 _At_(SocketOpContext, __drv_aliasesMem)
 VOID
 WskSampleEnqueueOp(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext,
     _In_ PWSKSAMPLE_OP_HANDLER_FN OpHandler
-    );
+);
 
 VOID
-WskSampleWorkerThread (
+WskSampleWorkerThread(
     _In_ PVOID Context
-    );
+);
 
 VOID
 WskSampleSetupListeningSocket(
     _In_ PWSK_PROVIDER_NPI WskProviderNpi,
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpStartListen(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpStopListen(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpReceive(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpSend(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpDisconnect(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpClose(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 VOID
 WskSampleOpFree(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    );
+);
 
 NTSTATUS
 WskSampleStartWorkQueue(
     _Out_ PWSKSAMPLE_WORK_QUEUE WorkQueue
-    );
+);
 
 VOID
 WskSampleStopWorkQueue(
     _In_ PWSKSAMPLE_WORK_QUEUE WorkQueue
-    );
+);
 
 VOID
 WskSampleUnload(
     _In_ PDRIVER_OBJECT DriverObject
-    );
+);
+
+NTSTATUS
+WskSampleCreateDevice(
+	_In_ PDRIVER_OBJECT DriverObject
+);
+
+NTSTATUS
+WskSampleCreateClose(
+	_In_ PDEVICE_OBJECT DeviceObject,
+	_In_ PIRP Irp
+);
+
+NTSTATUS
+WskSampleDeviceControl(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+);
+
+NTSTATUS
+WskSampleSendData(
+    PVOID DataBuffer,
+    ULONG DataLength
+);
+
 
 #ifdef ALLOC_PRAGMA
 
@@ -325,82 +331,6 @@ WskSampleUnload(
 
 #endif
 
-NTSTATUS WskSampleIoControl(
-    _In_ PDEVICE_OBJECT DeviceObject,
-    _In_ PIRP Irp
-) 
-{
-    PIO_STACK_LOCATION irpSp;
-    NTSTATUS status = STATUS_SUCCESS;
-    ULONG controlCode;
-    PVOID inputBuffer;
-    ULONG inputBufferLength;
-
-    DeviceObject;
-
-    irpSp = IoGetCurrentIrpStackLocation(Irp);
-    controlCode = irpSp->Parameters.DeviceIoControl.IoControlCode;
-    inputBuffer = Irp->AssociatedIrp.SystemBuffer;
-    inputBufferLength = irpSp->Parameters.DeviceIoControl.InputBufferLength;
-
-    switch (controlCode) {
-        case IOCTL_SEND_DATA:
-            if (inputBufferLength > 0 && inputBuffer != NULL) {
-                PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext = &WskSampleListeningSocketContext->OpContext[0];
-                PWSKSAMPLE_SOCKET_CONTEXT socketContext = SocketOpContext->SocketContext;
-
-                PAGED_CODE();
-
-                if (socketContext->Closing || socketContext->Disconnecting) {
-                    DoTraceMessage(TRCINFO, "Socket is closing or disconnecting. Skipping send.");
-                    status = STATUS_DEVICE_NOT_READY;
-                    break;
-                }
-
-                WSK_BUF wskbuf;
-                wskbuf.Offset = 0;
-                wskbuf.Length = inputBufferLength;
-
-                PMDL mdl = IoAllocateMdl(inputBuffer, inputBufferLength, FALSE, FALSE, NULL);
-                if (mdl == NULL) {
-                    status = STATUS_INSUFFICIENT_RESOURCES;
-                    break;
-                }
-
-                MmBuildMdlForNonPagedPool(mdl);
-                wskbuf.Mdl = mdl;
-
-                CONST WSK_PROVIDER_CONNECTION_DISPATCH* dispatch = socketContext->Socket->Dispatch;
-
-                DoTraceMessage(TRCINFO, "Sending %lu bytes to the socket.", inputBufferLength);
-
-                status = dispatch->WskSend(
-                    socketContext->Socket,
-                    &wskbuf,
-                    0,
-                    Irp
-                );
-
-                IoFreeMdl(mdl);
-
-                if (!NT_SUCCESS(status)) {
-                    DoTraceMessage(TRCERROR, "WskSend failed with status 0x%08X", status);
-                }
-            }
-            else {
-                status = STATUS_INVALID_PARAMETER;
-            }
-            break;
-        default:
-            status = STATUS_INVALID_DEVICE_REQUEST;
-            break;
-    }
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-    return status;
-}
-
 // Driver entry routine
 NTSTATUS
 DriverEntry(
@@ -417,32 +347,15 @@ DriverEntry(
 
     ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
 
-    UNICODE_STRING deviceName;
-    RtlInitUnicodeString(&deviceName, DRIVER_DEVICE_NAME);
-    status = IoCreateDevice(
-        DriverObject,
-        0, // Device extension size
-        &deviceName,
-        FILE_DEVICE_UNKNOWN,
-        0, // Device characteristics
-        FALSE, // Not exclusive
-        &g_DeviceObject
-    );
-
+    status = WskSampleCreateDevice(DriverObject);
     if (!NT_SUCCESS(status)) {
-        KdPrint(("Failed to create device object (0x%08X)\n", status));
         return status;
     }
 
-    // Step 2: Create Symbolic Link
-    RtlInitUnicodeString(&g_SymbolicLinkName, DRIVER_SYMBOLIC_NAME);
-    status = IoCreateSymbolicLink(&g_SymbolicLinkName, &deviceName);
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = WskSampleCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = WskSampleCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = WskSampleDeviceControl;
 
-    if (!NT_SUCCESS(status)) {
-        KdPrint(("Failed to create symbolic link (0x%08X)\n", status));
-        IoDeleteDevice(g_DeviceObject);
-        return status;
-    }
 
     // Allocate a socket context that will be used for queueing an operation
     // to setup a listening socket that will accept incoming connections
@@ -476,8 +389,6 @@ DriverEntry(
     WskSampleEnqueueOp(&WskSampleListeningSocketContext->OpContext[0],
         WskSampleOpStartListen);
 
-    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = WskSampleIoControl;
-
     // Everything has been initiated successfully. Now we can enable the
     // unload routine and return.
     DriverObject->DriverUnload = WskSampleUnload;
@@ -490,18 +401,24 @@ DriverEntry(
     return STATUS_SUCCESS;
 }
 
-
 // Driver unload routine
 VOID
 WskSampleUnload(
     _In_ PDRIVER_OBJECT DriverObject
-    )
-{  
+)
+{
     C_ASSERT(WSKSAMPLE_OP_COUNT >= 2);
 
     UNREFERENCED_PARAMETER(DriverObject);
 
+    UNICODE_STRING symbolicLinkName;
+
     PAGED_CODE();
+
+    RtlInitUnicodeString(&symbolicLinkName, L"\\DosDevices\\WskSampleDevice");
+    IoDeleteSymbolicLink(&symbolicLinkName);
+
+    IoDeleteDevice(DriverObject->DeviceObject);
 
     DoTraceMessage(TRCINFO, "UNLOAD START");
 
@@ -522,7 +439,7 @@ WskSampleUnload(
     // that a socket is closed only when other calls can NOT anymore be issued
     // on the socket.
     WskSampleEnqueueOp(&WskSampleListeningSocketContext->OpContext[1],
-                       WskSampleOpStopListen);
+        WskSampleOpStopListen);
 
     // Deregister with WSK. This call will wait until all the references to
     // the WSK provider NPI are released and all the sockets are closed. Note
@@ -538,12 +455,6 @@ WskSampleUnload(
     // are no queued items. Signal the worker thread to stop and wait for it. 
     WskSampleStopWorkQueue(&WskSampleWorkQueue);
 
-    // Delete Symbolic Link
-    IoDeleteSymbolicLink(&g_SymbolicLinkName);
-
-    // Delete Device Object
-    IoDeleteDevice(DriverObject->DeviceObject);
-    
     DoTraceMessage(TRCINFO, "UNLOAD END");
 
     WPP_CLEANUP(DriverObject);
@@ -553,32 +464,32 @@ WskSampleUnload(
 NTSTATUS
 WskSampleStartWorkQueue(
     _Out_ PWSKSAMPLE_WORK_QUEUE WorkQueue
-    )
+)
 {
     NTSTATUS status;
     HANDLE threadHandle;
 
     PAGED_CODE();
-    
+
     InitializeSListHead(&WorkQueue->Head);
     KeInitializeEvent(&WorkQueue->Event, SynchronizationEvent, FALSE);
     WorkQueue->Stop = FALSE;
 
     status = PsCreateSystemThread(
-                &threadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL,
-                WskSampleWorkerThread, WorkQueue);
+        &threadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL,
+        WskSampleWorkerThread, WorkQueue);
 
-    if(!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status)) {
         return status;
     }
 
     status = ObReferenceObjectByHandle(
-                threadHandle, THREAD_ALL_ACCESS, NULL, KernelMode,
-                &WorkQueue->Thread, NULL);
-    
+        threadHandle, THREAD_ALL_ACCESS, NULL, KernelMode,
+        &WorkQueue->Thread, NULL);
+
     ZwClose(threadHandle);
 
-    if(!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status)) {
         WorkQueue->Stop = TRUE;
         KeSetEvent(&WorkQueue->Event, 0, FALSE);
     }
@@ -590,7 +501,7 @@ WskSampleStartWorkQueue(
 VOID
 WskSampleStopWorkQueue(
     _In_ PWSKSAMPLE_WORK_QUEUE WorkQueue
-    )
+)
 {
     PAGED_CODE();
 
@@ -598,7 +509,7 @@ WskSampleStopWorkQueue(
     ASSERT(WorkQueue->Thread);
     WorkQueue->Stop = TRUE;
     KeSetEvent(&WorkQueue->Event, 0, FALSE);
-    KeWaitForSingleObject(WorkQueue->Thread, Executive, KernelMode, FALSE,NULL);
+    KeWaitForSingleObject(WorkQueue->Thread, Executive, KernelMode, FALSE, NULL);
     ObDereferenceObject(WorkQueue->Thread);
 }
 
@@ -610,10 +521,10 @@ PWSKSAMPLE_SOCKET_CONTEXT
 WskSampleAllocateSocketContext(
     _In_ PWSKSAMPLE_WORK_QUEUE WorkQueue,
     _In_ ULONG BufferLength
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
-    
+
     // Allocate and setup a socket context with optional data buffers, and
     // attach the socket to the given work queue. Even though this sample uses
     // only a single global work queue, the sample is designed to be easily
@@ -624,31 +535,31 @@ WskSampleAllocateSocketContext(
     socketContext = ExAllocatePoolZero(
         NonPagedPoolNx, sizeof(*socketContext), WSKSAMPLE_SOCKET_POOL_TAG);
 
-    if(socketContext != NULL) {
+    if (socketContext != NULL) {
 
         ULONG i;
 
         socketContext->WorkQueue = WorkQueue;
 
-        for(i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
+        for (i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
 
             socketContext->OpContext[i].SocketContext = socketContext;
 
             socketContext->OpContext[i].Irp = IoAllocateIrp(1, FALSE);
-            if(socketContext->OpContext[i].Irp == NULL) {
+            if (socketContext->OpContext[i].Irp == NULL) {
                 goto failure;
             }
 
-            if(BufferLength > 0) {
+            if (BufferLength > 0) {
                 socketContext->OpContext[i].DataBuffer = ExAllocatePoolUninitialized(
                     NonPagedPoolNx, BufferLength, WSKSAMPLE_BUFFER_POOL_TAG);
-                if(socketContext->OpContext[i].DataBuffer == NULL) {
+                if (socketContext->OpContext[i].DataBuffer == NULL) {
                     goto failure;
                 }
                 socketContext->OpContext[i].DataMdl = IoAllocateMdl(
-                   socketContext->OpContext[i].DataBuffer,
-                   BufferLength, FALSE, FALSE, NULL);
-                if(socketContext->OpContext[i].DataMdl == NULL) {
+                    socketContext->OpContext[i].DataBuffer,
+                    BufferLength, FALSE, FALSE, NULL);
+                if (socketContext->OpContext[i].DataMdl == NULL) {
                     goto failure;
                 }
                 MmBuildMdlForNonPagedPool(socketContext->OpContext[i].DataMdl);
@@ -665,7 +576,7 @@ failure:
 
     DoTraceMessage(TRCERROR, "AllocateSocketContext: FAIL");
 
-    if(socketContext) {
+    if (socketContext) {
         WskSampleFreeSocketContext(socketContext);
     }
 
@@ -677,7 +588,7 @@ _At_(SocketContext, __drv_freesMem(Mem))
 VOID
 WskSampleFreeSocketContext(
     _In_ PWSKSAMPLE_SOCKET_CONTEXT SocketContext
-    )
+)
 {
     ULONG i;
 
@@ -685,18 +596,18 @@ WskSampleFreeSocketContext(
     // socket are completed and all enqueued operations for the socket
     // are dequeued. So, we can safely free the Irp, Mdl, and data buffer
     // pointed by the socket operation contexts.
-    
-    for(i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
-        
-        if(SocketContext->OpContext[i].Irp != NULL) {
+
+    for (i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
+
+        if (SocketContext->OpContext[i].Irp != NULL) {
             IoFreeIrp(SocketContext->OpContext[i].Irp);
             SocketContext->OpContext[i].Irp = NULL;
         }
-        if(SocketContext->OpContext[i].DataMdl != NULL) {
+        if (SocketContext->OpContext[i].DataMdl != NULL) {
             IoFreeMdl(SocketContext->OpContext[i].DataMdl);
             SocketContext->OpContext[i].DataMdl = NULL;
         }
-        if(SocketContext->OpContext[i].DataBuffer != NULL) {
+        if (SocketContext->OpContext[i].DataBuffer != NULL) {
             ExFreePool(SocketContext->OpContext[i].DataBuffer);
             SocketContext->OpContext[i].DataBuffer = NULL;
         }
@@ -713,52 +624,52 @@ VOID
 WskSampleEnqueueOp(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext,
     _In_ PWSKSAMPLE_OP_HANDLER_FN OpHandler
-    )
+)
 {
     PWSKSAMPLE_WORK_QUEUE workQueue = SocketOpContext->SocketContext->WorkQueue;
 
     SocketOpContext->OpHandler = OpHandler;
 
-    #pragma warning(disable:4054) // turn off typecast warning
-    
-    if(NULL == InterlockedPushEntrySList(
-                &workQueue->Head, 
-                &SocketOpContext->QueueEntry)) {
-        DoTraceMessage(TRCINFO, "EnqueueOp: %p %p (%p) SetEvent", 
+#pragma warning(disable:4054) // turn off typecast warning
+
+    if (NULL == InterlockedPushEntrySList(
+        &workQueue->Head,
+        &SocketOpContext->QueueEntry)) {
+        DoTraceMessage(TRCINFO, "EnqueueOp: %p %p (%p) SetEvent",
             SocketOpContext->SocketContext, SocketOpContext, (PVOID)OpHandler);
         // Work queue was empty. So, signal the work queue event in case the
         // worker thread is waiting on the event for more operations.
         KeSetEvent(&workQueue->Event, 0, FALSE);
     }
     else
-        DoTraceMessage(TRCINFO, "EnqueueOp: %p %p (%p)", 
+        DoTraceMessage(TRCINFO, "EnqueueOp: %p %p (%p)",
             SocketOpContext->SocketContext, SocketOpContext, (PVOID)OpHandler);
 
-    #pragma warning(default:4054) // restore typecast warning
+#pragma warning(default:4054) // restore typecast warning
 }
 
 // Worker thread which drains and processes a given work queue
 VOID
-WskSampleWorkerThread (
+WskSampleWorkerThread(
     _In_ PVOID Context
-    )
+)
 {
     PWSKSAMPLE_WORK_QUEUE workQueue;
     PSLIST_ENTRY listEntryRev, listEntry, next;
-    
+
     PAGED_CODE();
 
     workQueue = (PWSKSAMPLE_WORK_QUEUE)Context;
 
-    for(;;) {
-        
+    for (;;) {
+
         // Flush all the queued operations into a local list
         listEntryRev = InterlockedFlushSList(&workQueue->Head);
 
-        if(listEntryRev == NULL) {
+        if (listEntryRev == NULL) {
 
             // There's no work to do. If we are allowed to stop, then stop.
-            if(workQueue->Stop) {
+            if (workQueue->Stop) {
                 DoTraceMessage(TRCINFO, "WorkerThread: WQ %p exit", workQueue);
                 break;
             }
@@ -766,7 +677,7 @@ WskSampleWorkerThread (
             DoTraceMessage(TRCINFO, "WorkerThread: WQ %p wait", workQueue);
 
             // Otherwise, wait for more operations to be enqueued.
-            KeWaitForSingleObject(&workQueue->Event, 
+            KeWaitForSingleObject(&workQueue->Event,
                 Executive, KernelMode, FALSE, 0);
             continue;
         }
@@ -783,19 +694,19 @@ WskSampleWorkerThread (
         }
 
         // Now process the correctly ordered list of operations one by one
-        while(listEntry) {
+        while (listEntry) {
 
             PWSKSAMPLE_SOCKET_OP_CONTEXT socketOpContext =
-                CONTAINING_RECORD(listEntry, 
+                CONTAINING_RECORD(listEntry,
                     WSKSAMPLE_SOCKET_OP_CONTEXT, QueueEntry);
             PWSKSAMPLE_OP_HANDLER_FN opHandler = socketOpContext->OpHandler;
-            
+
             listEntry = listEntry->Next;
 
             opHandler(socketOpContext);
         }
     }
-    
+
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
@@ -803,7 +714,7 @@ WskSampleWorkerThread (
 VOID
 WskSampleOpStartListen(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     NTSTATUS status;
     WSK_PROVIDER_NPI wskProviderNpi;
@@ -814,14 +725,14 @@ WskSampleOpStartListen(
     // This operation is made up of multiple WSK calls, and no other
     // operations will be processed until this compound operation is
     // finished synchronously in the context of the worker thread.
-    
+
     // Capture the WSK Provider NPI
     status = WskCaptureProviderNPI(
-                &WskSampleRegistration, 
-                WSK_INFINITE_WAIT,
-                &wskProviderNpi);
+        &WskSampleRegistration,
+        WSK_INFINITE_WAIT,
+        &wskProviderNpi);
 
-    if(NT_SUCCESS(status)) {
+    if (NT_SUCCESS(status)) {
 
         // Create a listening socket
         WskSampleSetupListeningSocket(&wskProviderNpi, SocketOpContext);
@@ -833,7 +744,7 @@ WskSampleOpStartListen(
         // WskCaptureProviderNPI will fail if WskDeregister is called
         // from the Driver Unload routine before the WSK subsystem
         // becomes ready.
-        DoTraceMessage(TRCINFO, 
+        DoTraceMessage(TRCINFO,
             "OpStartListen: WskCaptureProviderNPI failed 0x%lx", status);
     }
 }
@@ -843,7 +754,7 @@ VOID
 WskSampleSetupListeningSocket(
     _In_ PWSK_PROVIDER_NPI WskProviderNpi,
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     NTSTATUS status;
     WSK_EVENT_CALLBACK_CONTROL callbackControl;
@@ -855,31 +766,31 @@ WskSampleSetupListeningSocket(
     PIRP irp = SocketOpContext->Irp;
 
     PAGED_CODE();
-    
+
     KeInitializeEvent(&compEvent, SynchronizationEvent, FALSE);
 
-    if(socketContext->Socket != NULL) {
+    if (socketContext->Socket != NULL) {
 
         // If there's already a socket then we must be getting called because
         // the WskAcceptevent indicated a NULL AcceptSocket, i.e. the listening
         // socket is no longer functional. So, we will close the existing
         // listening socket and try to create a new one.
 
-        if(socketContext->StopListening) {
+        if (socketContext->StopListening) {
             // Listening socket is already being closed because the driver
             // is being unloaded. So, there's no need to recreate it.
             return;
         }
-        
+
         IoReuseIrp(irp, STATUS_UNSUCCESSFUL);
 
-        IoSetCompletionRoutine(irp, 
+        IoSetCompletionRoutine(irp,
             WskSampleSyncIrpCompletionRoutine,
             &compEvent, TRUE, TRUE, TRUE);
 
         ((PWSK_PROVIDER_LISTEN_DISPATCH)
             socketContext->Socket->Dispatch)->
-                WskCloseSocket(socketContext->Socket, irp);
+            WskCloseSocket(socketContext->Socket, irp);
 
         KeWaitForSingleObject(&compEvent, Executive, KernelMode, FALSE, NULL);
 
@@ -894,22 +805,22 @@ WskSampleSetupListeningSocket(
         callbackControl.NpiId = (PNPIID)&NPI_WSK_INTERFACE_ID;
         callbackControl.EventMask = WSK_EVENT_ACCEPT;
         status = WskProviderNpi->Dispatch->WskControlClient(
-                            WskProviderNpi->Client,
-                            WSK_SET_STATIC_EVENT_CALLBACKS,
-                            sizeof(callbackControl),
-                            &callbackControl,
-                            0,
-                            NULL,
-                            NULL,
-                            NULL);
-        if(!NT_SUCCESS(status)) {
-            DoTraceMessage(TRCERROR, 
-              "SetupListeningSocket: WSK_SET_STATIC_EVENT_CALLBACKS FAIL 0x%lx",
-              status);
-            goto failexit;        
+            WskProviderNpi->Client,
+            WSK_SET_STATIC_EVENT_CALLBACKS,
+            sizeof(callbackControl),
+            &callbackControl,
+            0,
+            NULL,
+            NULL,
+            NULL);
+        if (!NT_SUCCESS(status)) {
+            DoTraceMessage(TRCERROR,
+                "SetupListeningSocket: WSK_SET_STATIC_EVENT_CALLBACKS FAIL 0x%lx",
+                status);
+            goto failexit;
         }
     }
-    
+
     // Create a listening socket over AF_INET6 address family. Put the socket
     // into dual-family mode by setting IPV6_V6ONLY option to FALSE so that 
     // AF_INET traffic is also handled over the same socket.
@@ -921,21 +832,21 @@ WskSampleSetupListeningSocket(
     // We do not need to check the return status since the actual completion
     // status will be captured from the IRP after the IRP is completed.
     WskProviderNpi->Dispatch->WskSocket(
-                WskProviderNpi->Client,
-                AF_INET6,
-                SOCK_STREAM,
-                IPPROTO_TCP,
-                WSK_FLAG_LISTEN_SOCKET,
-                socketContext,
-                &WskSampleClientListenDispatch,
-                NULL, // Process
-                NULL, // Thread
-                NULL, // SecurityDescriptor
-                irp);
-    
+        WskProviderNpi->Client,
+        AF_INET6,
+        SOCK_STREAM,
+        IPPROTO_TCP,
+        WSK_FLAG_LISTEN_SOCKET,
+        socketContext,
+        &WskSampleClientListenDispatch,
+        NULL, // Process
+        NULL, // Thread
+        NULL, // SecurityDescriptor
+        irp);
+
     KeWaitForSingleObject(&compEvent, Executive, KernelMode, FALSE, NULL);
 
-    if(!NT_SUCCESS(irp->IoStatus.Status)) {
+    if (!NT_SUCCESS(irp->IoStatus.Status)) {
         DoTraceMessage(TRCERROR, "SetupListeningSocket: WskSocket FAIL 0x%lx",
             irp->IoStatus.Status);
         goto failexit;
@@ -943,12 +854,12 @@ WskSampleSetupListeningSocket(
 
     listeningSocket = (PWSK_SOCKET)irp->IoStatus.Information;
     dispatch = (PWSK_PROVIDER_LISTEN_DISPATCH)listeningSocket->Dispatch;
-    
+
     // Set IPV6_V6ONLY to FALSE before the bind operation
 
     optionValue = 0;
 
-    IoReuseIrp(irp, STATUS_UNSUCCESSFUL);    
+    IoReuseIrp(irp, STATUS_UNSUCCESSFUL);
     IoSetCompletionRoutine(irp,
         WskSampleSyncIrpCompletionRoutine,
         &compEvent, TRUE, TRUE, TRUE);
@@ -956,20 +867,20 @@ WskSampleSetupListeningSocket(
     // We do not need to check the return status since the actual completion
     // status will be captured from the IRP after the IRP is completed.
     dispatch->WskControlSocket(
-                listeningSocket,
-                WskSetOption,
-                IPV6_V6ONLY,
-                IPPROTO_IPV6,
-                sizeof(optionValue),
-                &optionValue,
-                0,
-                NULL,
-                NULL,
-                irp);
-    
+        listeningSocket,
+        WskSetOption,
+        IPV6_V6ONLY,
+        IPPROTO_IPV6,
+        sizeof(optionValue),
+        &optionValue,
+        0,
+        NULL,
+        NULL,
+        irp);
+
     KeWaitForSingleObject(&compEvent, Executive, KernelMode, FALSE, NULL);
 
-    if(!NT_SUCCESS(irp->IoStatus.Status)) {
+    if (!NT_SUCCESS(irp->IoStatus.Status)) {
         DoTraceMessage(TRCERROR, "SetupListeningSocket: IPV6_V6ONLY FAIL 0x%lx",
             irp->IoStatus.Status);
         goto failexit;
@@ -985,14 +896,14 @@ WskSampleSetupListeningSocket(
     // We do not need to check the return status since the actual completion
     // status will be captured from the IRP after the IRP is completed.
     dispatch->WskBind(
-                listeningSocket,
-                (PSOCKADDR)&IPv6ListeningAddress,
-                0,
-                irp);
+        listeningSocket,
+        (PSOCKADDR)&IPv6ListeningAddress,
+        0,
+        irp);
 
     KeWaitForSingleObject(&compEvent, Executive, KernelMode, FALSE, NULL);
 
-    if(!NT_SUCCESS(irp->IoStatus.Status)) {
+    if (!NT_SUCCESS(irp->IoStatus.Status)) {
         DoTraceMessage(TRCERROR, "SetupListeningSocket: WskBind FAIL 0x%lx",
             irp->IoStatus.Status);
         goto failexit;
@@ -1004,17 +915,17 @@ WskSampleSetupListeningSocket(
     ASSERT(socketContext->Socket == NULL);
     socketContext->Socket = listeningSocket;
 
-    DoTraceMessage(TRCINFO, "SetupListeningSocket: %p %p", 
+    DoTraceMessage(TRCINFO, "SetupListeningSocket: %p %p",
         socketContext, SocketOpContext);
-    
+
     return;
-    
+
 failexit:
 
-    if(listeningSocket) {
+    if (listeningSocket) {
 
         IoReuseIrp(irp, STATUS_UNSUCCESSFUL);
-        IoSetCompletionRoutine(irp, 
+        IoSetCompletionRoutine(irp,
             WskSampleSyncIrpCompletionRoutine,
             &compEvent, TRUE, TRUE, TRUE);
 
@@ -1030,13 +941,13 @@ WskSampleSyncIrpCompletionRoutine(
     PDEVICE_OBJECT Reserved,
     PIRP Irp,
     PVOID Context
-    )
-{    
+)
+{
     PKEVENT compEvent = (PKEVENT)Context;
     _Analysis_assume_(Context != NULL);
     UNREFERENCED_PARAMETER(Reserved);
     UNREFERENCED_PARAMETER(Irp);
-    KeSetEvent(compEvent, 2, FALSE);    
+    KeSetEvent(compEvent, 2, FALSE);
     return STATUS_MORE_PROCESSING_REQUIRED;
 }
 
@@ -1044,7 +955,7 @@ WskSampleSyncIrpCompletionRoutine(
 VOID
 WskSampleOpStopListen(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
 
@@ -1052,12 +963,12 @@ WskSampleOpStopListen(
 
     socketContext = SocketOpContext->SocketContext;
 
-    DoTraceMessage(TRCINFO, "OpStopListen: %p %p", 
+    DoTraceMessage(TRCINFO, "OpStopListen: %p %p",
         socketContext, SocketOpContext);
 
     socketContext->StopListening = TRUE;
-    
-    if(socketContext->Socket == NULL) {
+
+    if (socketContext->Socket == NULL) {
         // Listening socket was NOT created due to some failure.
         // All we need to do is to free up the socket context.
         WskSampleEnqueueOp(SocketOpContext, WskSampleOpFree);
@@ -1070,16 +981,16 @@ WskSampleOpStopListen(
 
 // Listening socket callback which is invoked whenever a new connection arrives.
 NTSTATUS
-WSKAPI 
+WSKAPI
 WskSampleAcceptEvent(
     _In_  PVOID         SocketContext,
     _In_  ULONG         Flags,
     _In_  PSOCKADDR     LocalAddress,
     _In_  PSOCKADDR     RemoteAddress,
     _In_opt_  PWSK_SOCKET AcceptSocket,
-    _Outptr_result_maybenull_ PVOID *AcceptSocketContext,
-    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH **AcceptSocketDispatch
-    )
+    _Outptr_result_maybenull_ PVOID * AcceptSocketContext,
+    _Outptr_result_maybenull_ CONST WSK_CLIENT_CONNECTION_DISPATCH * *AcceptSocketDispatch
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext = NULL;
     PWSKSAMPLE_SOCKET_CONTEXT listeningSocketContext;
@@ -1088,10 +999,10 @@ WskSampleAcceptEvent(
     UNREFERENCED_PARAMETER(Flags);
     UNREFERENCED_PARAMETER(LocalAddress);
     UNREFERENCED_PARAMETER(RemoteAddress);
-    
+
     listeningSocketContext = (PWSKSAMPLE_SOCKET_CONTEXT)SocketContext;
 
-    if(AcceptSocket == NULL) {
+    if (AcceptSocket == NULL) {
         // If WSK provider makes a WskAcceptEvent callback with NULL 
         // AcceptSocket, this means that the listening socket is no longer
         // functional. The WSK client may handle this situation by trying
@@ -1104,85 +1015,39 @@ WskSampleAcceptEvent(
         // WskSampleStartListen operation on the listening socket. The
         // WskSampleStartListen operation will close the existing listening
         // socket and create a new one.
-        WskSampleEnqueueOp(&listeningSocketContext->OpContext[0], 
-                           WskSampleOpStartListen);
+        WskSampleEnqueueOp(&listeningSocketContext->OpContext[0],
+            WskSampleOpStartListen);
         return STATUS_REQUEST_NOT_ACCEPTED;
     }
 
     // Allocate socket context for the newly accepted socket.
     socketContext = WskSampleAllocateSocketContext(
-                        &WskSampleWorkQueue, WSKSAMPLE_DATA_BUFFER_LENGTH);
-    
-    if(socketContext == NULL) {
+        &WskSampleWorkQueue, WSKSAMPLE_DATA_BUFFER_LENGTH);
+
+    if (socketContext == NULL) {
         return STATUS_REQUEST_NOT_ACCEPTED;
     }
 
     socketContext->Socket = AcceptSocket;
 
     DoTraceMessage(TRCINFO, "AcceptEvent: %p", socketContext);
-    
+
     // Enqueue receive operations on the accepted socket. Whenever a receive
     // operation is completed successfully, the received data will be echoed
     // back to the peer via a send operation. Whenever a send operation is 
     // completed, a new receive request will be issued over the connection.
     // This will continue until the connection is closed by the peer.
-    for(i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
+    for (i = 0; i < WSKSAMPLE_OP_COUNT; i++) {
         _Analysis_assume_(socketContext == socketContext->OpContext[i].SocketContext);
         WskSampleEnqueueOp(&socketContext->OpContext[i], WskSampleOpReceive);
     }
-    
+
     // Since we will not use any callbacks on the accepted socket, we specify no
     // socketContext or callback dispatch table pointer for the accepted socket.
     *AcceptSocketContext = NULL;
     *AcceptSocketDispatch = NULL;
 
     return STATUS_SUCCESS;
-}
-
-// Operation handler for issuing a receive request on a connected socket
-VOID
-WskSampleOpReceive(
-    _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
-{
-    PWSKSAMPLE_SOCKET_CONTEXT socketContext;
-
-    PAGED_CODE();
-
-    socketContext = SocketOpContext->SocketContext;
-
-    if(socketContext->Closing || socketContext->Disconnecting) {
-        // Do not call WskReceive if socket is being disconnected
-        // or closed. The operation context will not be used any more.
-        DoTraceMessage(TRCINFO, "OpReceive: %p %p SKIP", 
-            socketContext, SocketOpContext);
-    }
-    else {
-        WSK_BUF wskbuf;
-        CONST WSK_PROVIDER_CONNECTION_DISPATCH *dispatch;
-
-        dispatch = socketContext->Socket->Dispatch;
-
-        wskbuf.Offset = 0;
-        wskbuf.Length = SocketOpContext->BufferLength;
-        wskbuf.Mdl = SocketOpContext->DataMdl;
-
-        IoReuseIrp(SocketOpContext->Irp, STATUS_UNSUCCESSFUL);
-        IoSetCompletionRoutine(SocketOpContext->Irp,
-            WskSampleReceiveIrpCompletionRoutine,
-            SocketOpContext, TRUE, TRUE, TRUE);
-
-        DoTraceMessage(TRCINFO, "OpReceive: %p %p %Iu", 
-            socketContext, SocketOpContext, wskbuf.Length);
-
-        // No need to check the return status here. The IRP completion
-        // routine will take action based on the completion status.
-        dispatch->WskReceive(
-            socketContext->Socket,
-            &wskbuf,
-            0,
-            SocketOpContext->Irp);
-    }
 }
 
 // IRP completion routine for WskReceive requests
@@ -1192,7 +1057,7 @@ WskSampleReceiveIrpCompletionRoutine(
     PDEVICE_OBJECT Reserved,
     PIRP Irp,
     PVOID Context
-    )
+)
 {
     PWSKSAMPLE_SOCKET_OP_CONTEXT socketOpContext;
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
@@ -1204,17 +1069,17 @@ WskSampleReceiveIrpCompletionRoutine(
     socketOpContext = (PWSKSAMPLE_SOCKET_OP_CONTEXT)Context;
     socketContext = socketOpContext->SocketContext;
 
-    DoTraceMessage(TRCINFO, 
-        "ReceiveIrpCompletionRoutine: %p %p 0x%lx %Iu", 
-        socketContext, socketOpContext, Irp->IoStatus.Status, 
+    DoTraceMessage(TRCINFO,
+        "ReceiveIrpCompletionRoutine: %p %p 0x%lx %Iu",
+        socketContext, socketOpContext, Irp->IoStatus.Status,
         Irp->IoStatus.Information);
 
-    if(!NT_SUCCESS(Irp->IoStatus.Status)) {
+    if (!NT_SUCCESS(Irp->IoStatus.Status)) {
         // Receive failed. Enqueue an operation to close the socket
         WskSampleEnqueueOp(socketOpContext, WskSampleOpClose);
     }
     else {
-        if(Irp->IoStatus.Information == 0) {
+        if (Irp->IoStatus.Information == 0) {
             // Successful receive completion with 0 bytes means the peer
             // has gracefully disconnected its half of the connection.
             // So, we enqueue an operation to disconnect our half.
@@ -1227,10 +1092,10 @@ WskSampleReceiveIrpCompletionRoutine(
             // queued. We just need to remember the actual length of
             // data received into the buffer.
             socketOpContext->DataLength = Irp->IoStatus.Information;
-            WskSampleEnqueueOp(socketOpContext, WskSampleOpSend);                    
+            WskSampleEnqueueOp(socketOpContext, WskSampleOpSend);
         }
     }
-    
+
     return STATUS_MORE_PROCESSING_REQUIRED;
 }
 
@@ -1238,7 +1103,7 @@ WskSampleReceiveIrpCompletionRoutine(
 VOID
 WskSampleOpSend(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
 
@@ -1246,15 +1111,15 @@ WskSampleOpSend(
 
     socketContext = SocketOpContext->SocketContext;
 
-    if(socketContext->Closing || socketContext->Disconnecting) {
+    if (socketContext->Closing || socketContext->Disconnecting) {
         // Do not call WskSend if socket is being disconnected
         // or closed. The operation context will not be used any more.
-        DoTraceMessage(TRCINFO, "OpSend: %p %p SKIP", 
+        DoTraceMessage(TRCINFO, "OpSend: %p %p SKIP",
             socketContext, SocketOpContext);
     }
     else {
         WSK_BUF wskbuf;
-        CONST WSK_PROVIDER_CONNECTION_DISPATCH *dispatch;
+        CONST WSK_PROVIDER_CONNECTION_DISPATCH* dispatch;
 
         dispatch = socketContext->Socket->Dispatch;
 
@@ -1267,7 +1132,7 @@ WskSampleOpSend(
             WskSampleSendIrpCompletionRoutine,
             SocketOpContext, TRUE, TRUE, TRUE);
 
-        DoTraceMessage(TRCINFO, "OpSend: %p %p %Iu", 
+        DoTraceMessage(TRCINFO, "OpSend: %p %p %Iu",
             socketContext, SocketOpContext, wskbuf.Length);
 
         // No need to check the return status here. The IRP completion
@@ -1287,7 +1152,7 @@ WskSampleSendIrpCompletionRoutine(
     PDEVICE_OBJECT Reserved,
     PIRP Irp,
     PVOID Context
-    )
+)
 {
     PWSKSAMPLE_SOCKET_OP_CONTEXT socketOpContext;
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
@@ -1299,17 +1164,17 @@ WskSampleSendIrpCompletionRoutine(
     socketOpContext = (PWSKSAMPLE_SOCKET_OP_CONTEXT)Context;
     socketContext = socketOpContext->SocketContext;
 
-    DoTraceMessage(TRCINFO, 
+    DoTraceMessage(TRCINFO,
         "SendIrpCompletionRoutine: %p %p 0x%lx %Iu", socketContext,
         socketOpContext, Irp->IoStatus.Status, Irp->IoStatus.Information);
 
-    if(!NT_SUCCESS(Irp->IoStatus.Status)) {
+    if (!NT_SUCCESS(Irp->IoStatus.Status)) {
         // Send failed. Enqueue an operation to close the socket.
         WskSampleEnqueueOp(socketOpContext, WskSampleOpClose);
     }
     else {
         // Send succeeded. Enqueue an operation to receive more data.
-        WskSampleEnqueueOp(socketOpContext, WskSampleOpReceive);                    
+        WskSampleEnqueueOp(socketOpContext, WskSampleOpReceive);
     }
 
     return STATUS_MORE_PROCESSING_REQUIRED;
@@ -1319,7 +1184,7 @@ WskSampleSendIrpCompletionRoutine(
 VOID
 WskSampleOpDisconnect(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
 
@@ -1327,27 +1192,27 @@ WskSampleOpDisconnect(
 
     socketContext = SocketOpContext->SocketContext;
 
-    if(socketContext->Closing || socketContext->Disconnecting) {
+    if (socketContext->Closing || socketContext->Disconnecting) {
         // Do not call WskDisconnect if socket is already being
         // disconnected or closed. A disconnect operation may get
         // enqueued multiple times as a result of multiple outstanding
         // receive requests getting completed with success and 0 bytes.
-        DoTraceMessage(TRCINFO, "OpDisconnect: %p %p SKIP", 
+        DoTraceMessage(TRCINFO, "OpDisconnect: %p %p SKIP",
             socketContext, SocketOpContext);
     }
     else {
-        CONST WSK_PROVIDER_CONNECTION_DISPATCH *dispatch;
+        CONST WSK_PROVIDER_CONNECTION_DISPATCH* dispatch;
 
         dispatch = socketContext->Socket->Dispatch;
 
         socketContext->Disconnecting = TRUE;
-        
+
         IoReuseIrp(SocketOpContext->Irp, STATUS_UNSUCCESSFUL);
         IoSetCompletionRoutine(SocketOpContext->Irp,
             WskSampleDisconnectIrpCompletionRoutine,
             SocketOpContext, TRUE, TRUE, TRUE);
 
-        DoTraceMessage(TRCINFO, "OpDisconnect: %p %p", 
+        DoTraceMessage(TRCINFO, "OpDisconnect: %p %p",
             socketContext, SocketOpContext);
 
         // No need to check the return status here. The IRP completion
@@ -1367,7 +1232,7 @@ WskSampleDisconnectIrpCompletionRoutine(
     PDEVICE_OBJECT Reserved,
     PIRP Irp,
     PVOID Context
-    )
+)
 {
     PWSKSAMPLE_SOCKET_OP_CONTEXT socketOpContext;
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
@@ -1393,7 +1258,7 @@ WskSampleDisconnectIrpCompletionRoutine(
 VOID
 WskSampleOpClose(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
 
@@ -1401,16 +1266,16 @@ WskSampleOpClose(
 
     socketContext = SocketOpContext->SocketContext;
 
-    if(socketContext->Closing) {
+    if (socketContext->Closing) {
         // Do not call WskClose if socket is already being closed.
         // A close operation may get enqueued multiple times as a result
         // of multiple outstanding send/receive/disconnect operations
         // getting completed with failure.
-        DoTraceMessage(TRCINFO, "OpClose: %p %p SKIP", 
+        DoTraceMessage(TRCINFO, "OpClose: %p %p SKIP",
             socketContext, SocketOpContext);
     }
     else {
-        CONST WSK_PROVIDER_BASIC_DISPATCH *dispatch;
+        CONST WSK_PROVIDER_BASIC_DISPATCH* dispatch;
 
         socketContext->Closing = TRUE;
 
@@ -1420,8 +1285,8 @@ WskSampleOpClose(
         IoSetCompletionRoutine(SocketOpContext->Irp,
             WskSampleCloseIrpCompletionRoutine,
             SocketOpContext, TRUE, TRUE, TRUE);
-        
-        DoTraceMessage(TRCINFO,"OpClose: %p %p", socketContext,SocketOpContext);
+
+        DoTraceMessage(TRCINFO, "OpClose: %p %p", socketContext, SocketOpContext);
 
         // No need to check the return status here. The IRP completion
         // routine will take action based on the completion status.
@@ -1438,7 +1303,7 @@ WskSampleCloseIrpCompletionRoutine(
     PDEVICE_OBJECT Reserved,
     PIRP Irp,
     PVOID Context
-    )
+)
 {
     PWSKSAMPLE_SOCKET_OP_CONTEXT socketOpContext;
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
@@ -1456,7 +1321,7 @@ WskSampleCloseIrpCompletionRoutine(
 
     DoTraceMessage(TRCINFO, "CloseIrpCompletionRoutine: %p %p 0x%lx",
         socketContext, socketOpContext, Irp->IoStatus.Status);
-    
+
     // Enqueue an operation to free the socket context. Since the 
     // completion of WskCloseSocket guarantees that there are no
     // outstanding requests or callbacks on the socket, we can
@@ -1478,7 +1343,7 @@ WskSampleCloseIrpCompletionRoutine(
 VOID
 WskSampleOpFree(
     _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
-    )
+)
 {
     PWSKSAMPLE_SOCKET_CONTEXT socketContext;
 
@@ -1492,3 +1357,166 @@ WskSampleOpFree(
     WskSampleFreeSocketContext(socketContext);
 }
 
+NTSTATUS
+WskSampleCreateDevice(
+    _In_ PDRIVER_OBJECT DriverObject
+)
+{
+    NTSTATUS status;
+    UNICODE_STRING deviceName;
+    UNICODE_STRING symbolicLinkName;
+    PDEVICE_OBJECT deviceObject = NULL;
+
+    RtlInitUnicodeString(&deviceName, L"\\Device\\WskSampleDevice");
+    RtlInitUnicodeString(&symbolicLinkName, L"\\DosDevices\\WskSampleDevice");
+
+    status = IoCreateDevice(
+        DriverObject,
+        0,
+        &deviceName,
+        FILE_DEVICE_UNKNOWN,
+        FILE_DEVICE_SECURE_OPEN,
+        FALSE,
+        &deviceObject
+    );
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = IoCreateSymbolicLink(&symbolicLinkName, &deviceName);
+
+    if (!NT_SUCCESS(status)) {
+        IoDeleteDevice(deviceObject);
+        return status;
+    }
+
+    deviceObject->Flags |= DO_BUFFERED_IO;
+    deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+WskSampleDeviceControl(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    PIO_STACK_LOCATION irpSp;
+    NTSTATUS status = STATUS_SUCCESS;
+    ULONG_PTR information = 0;
+    PVOID inputBuffer;
+    ULONG inputBufferLength;
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    irpSp = IoGetCurrentIrpStackLocation(Irp);
+
+    switch (irpSp->Parameters.DeviceIoControl.IoControlCode) {
+    case IOCTL_SEND_DATA:
+        inputBuffer = Irp->AssociatedIrp.SystemBuffer;
+        inputBufferLength = irpSp->Parameters.DeviceIoControl.InputBufferLength;
+
+        if (inputBuffer == NULL || inputBufferLength == 0) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        // Przeœlij dane przez socket
+        status = WskSampleSendData(inputBuffer, inputBufferLength);
+        if (NT_SUCCESS(status)) {
+            information = inputBufferLength;
+        }
+        break;
+
+    default:
+        status = STATUS_INVALID_DEVICE_REQUEST;
+        break;
+    }
+
+    Irp->IoStatus.Status = status;
+    Irp->IoStatus.Information = information;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+// Operation handler for issuing a receive request on a connected socket
+VOID
+WskSampleOpReceive(
+    _In_ PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext
+)
+{
+    PWSKSAMPLE_SOCKET_CONTEXT socketContext;
+
+    PAGED_CODE();
+
+    socketContext = SocketOpContext->SocketContext;
+
+    if (socketContext->Closing || socketContext->Disconnecting) {
+        // Do not call WskReceive if socket is being disconnected
+        // or closed. The operation context will not be used any more.
+        DoTraceMessage(TRCINFO, "OpReceive: %p %p SKIP",
+            socketContext, SocketOpContext);
+    }
+    else {
+        WSK_BUF wskbuf;
+        CONST WSK_PROVIDER_CONNECTION_DISPATCH* dispatch;
+
+        dispatch = socketContext->Socket->Dispatch;
+
+        wskbuf.Offset = 0;
+        wskbuf.Length = SocketOpContext->BufferLength;
+        wskbuf.Mdl = SocketOpContext->DataMdl;
+
+        IoReuseIrp(SocketOpContext->Irp, STATUS_UNSUCCESSFUL);
+        IoSetCompletionRoutine(SocketOpContext->Irp,
+            WskSampleReceiveIrpCompletionRoutine,
+            SocketOpContext, TRUE, TRUE, TRUE);
+
+        DoTraceMessage(TRCINFO, "OpReceive: %p %p %Iu",
+            socketContext, SocketOpContext, wskbuf.Length);
+
+        // No need to check the return status here. The IRP completion
+        // routine will take action based on the completion status.
+        dispatch->WskReceive(
+            socketContext->Socket,
+            &wskbuf,
+            0,
+            SocketOpContext->Irp);
+    }
+}
+
+_Use_decl_annotations_
+NTSTATUS
+WskSampleCreateClose(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+WskSampleSendData(
+    PVOID DataBuffer,
+    ULONG DataLength
+)
+{
+	PWSKSAMPLE_SOCKET_OP_CONTEXT SocketOpContext = &WskSampleListeningSocketContext->OpContext[0];
+
+	SocketOpContext->DataBuffer = DataBuffer;
+	SocketOpContext->DataLength = DataLength;
+	SocketOpContext->DataMdl = IoAllocateMdl(SocketOpContext->DataBuffer, DataLength, FALSE, FALSE, NULL);
+
+	WskSampleEnqueueOp(SocketOpContext, WskSampleOpSend);
+
+	return STATUS_SUCCESS;
+}
